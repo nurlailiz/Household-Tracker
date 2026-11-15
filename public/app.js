@@ -124,7 +124,8 @@ const displayName = (user) => {
 const S = {
   me: null,
   db: null,
-  tab: store.get('tab', 'cats'),
+  tab: store.get('tab', 'home'),
+  moneyWho: store.get('moneyWho', 'me'),
   catId: store.get('catId', null),
   month: thisMonth(),
 };
@@ -135,7 +136,7 @@ const SCHEMA = {
   weights: { catId: 'str!', date: 'str!', kg: 'num!', notes: 'str' },
   feedings: { catId: 'str!', time: 'str!', food: 'str', amount: 'str', notes: 'str' },
   events: { catId: 'str!', type: 'str!', date: 'str!', nextDue: 'str', notes: 'str' },
-  transactions: { type: 'str!', amount: 'num!', month: 'str!', date: 'str', category: 'str', description: 'str' },
+  transactions: { type: 'str!', amount: 'num!', month: 'str!', date: 'str', category: 'str', description: 'str', person: 'str' },
   groceries: { name: 'str!', quantity: 'str', note: 'str', addedDate: 'str!', bought: 'bool', boughtDate: 'str', boughtBy: 'str', expiry: 'str' },
 };
 const COLLECTIONS = Object.keys(SCHEMA);
@@ -239,6 +240,8 @@ function startSync() {
   }
   unsubscribers.push(onSnapshot(doc(fdb, 'settings', 'app'), (snap) => {
     S.db.settings = { currency: '$', ...(snap.data() || {}) };
+    const known = S.db.settings.people || [];
+    if (!snap.metadata?.fromCache && S.me && !known.includes(S.me)) saveSettings({ people: [...known, S.me] });
     ready('settings');
   }, onError));
 }
@@ -413,6 +416,7 @@ function renderLogin(message = '') {
 // Shell
 // ============================================================
 const TABS = [
+  { id: 'home', label: 'Home', ico: '🏠' },
   { id: 'cats', label: 'Cats', ico: '🐱' },
   { id: 'money', label: 'Money', ico: '💰' },
   { id: 'grocery', label: 'Grocery', ico: '🛒' },
@@ -423,7 +427,7 @@ function render() {
   const scroll = window.scrollY;
   const active = document.activeElement?.closest('#groceryAdd') ? document.activeElement.name : null;
   const draft = $('#groceryAdd') ? Object.fromEntries(new FormData($('#groceryAdd')).entries()) : null;
-  const body = { cats: renderCats, money: renderMoney, grocery: renderGrocery }[S.tab] || renderCats;
+  const body = { home: renderHome, cats: renderCats, money: renderMoney, grocery: renderGrocery }[S.tab] || renderHome;
   $('#app').innerHTML = `
     <header class="topbar">
       <h1><img src="./icon.svg" alt="">Our Home</h1>
@@ -586,6 +590,65 @@ ACTIONS.openImport = () => {
 };
 
 // ============================================================
+// Home: the overview of everything
+// ============================================================
+function renderHome() {
+  const hour = new Date().getHours();
+  const hello = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const catById = Object.fromEntries(S.db.cats.map((c) => [c.id, c]));
+  const due = dueList().filter((x) => catById[x.e.catId]).slice(0, 5);
+  const toBuy = S.db.groceries.filter((g) => !g.bought)
+    .sort((a, b) => b.addedDate.localeCompare(a.addedDate) || (b.createdAt || '').localeCompare(a.createdAt || ''));
+  const expiring = expiringSoon();
+  const more = (tab) => `<button class="btn ghost small" data-tab="${tab}">See all ›</button>`;
+
+  const catsCard = `<div class="card">
+    <div class="section-head"><h2>🐾 Cats · next up</h2>${more('cats')}</div>
+    ${!S.db.cats.length ? '<p class="empty">No cats yet.</p>'
+      : due.length ? due.map(({ e, due: d, planned }) => `<div class="reminder clickable" role="button" tabindex="0" data-action="openCat" data-id="${e.catId}">
+          ${avatar(catById[e.catId])}
+          <div class="grow"><div><strong>${esc(catById[e.catId].name)}</strong> · ${EVENT_ICONS[e.type] || '📌'} ${esc(e.type)}</div>
+          <div class="meta muted small">${planned ? 'Planned' : `Last ${fmtShort(e.date)}`}${e.notes ? ' · ' + esc(shorten(e.notes, 60)) : ''}</div></div>
+          ${dueBadge(d)}</div>`).join('')
+      : '<p class="empty">Nothing scheduled. Add a "next due" date to a vaccine, deworm or vet visit.</p>'}
+  </div>`;
+
+  const moneyCard = `<div class="card">
+    <div class="section-head"><h2>💰 ${fmtMonth(thisMonth())}</h2>${more('money')}</div>
+    ${people().map((p) => personBalance(p, thisMonth())).join('')}
+  </div>`;
+
+  const expiringCard = expiring.length ? `<div class="card alert">
+    <div class="section-head"><h2>⚠️ Expiring soon<small>${expiring.length}</small></h2>${more('grocery')}</div>
+    <ul class="list">${expiring.map((g) => `<li class="clickable" data-action="editGrocery" data-id="${g.id}">
+      <div class="grow"><div class="title">${esc(g.name)}${g.quantity ? ` <span class="muted">· ${esc(g.quantity)}</span>` : ''}</div></div>
+      ${expiryBadge(g.expiry)}</li>`).join('')}</ul>
+  </div>` : '';
+
+  const shown = toBuy.slice(0, 8);
+  const groceryCard = `<div class="card">
+    <div class="section-head"><h2>🛒 To buy<small>${toBuy.length}</small></h2>${more('grocery')}</div>
+    ${toBuy.length ? `<ul class="list">${shown.map((g) => `<li>
+        <button class="check" data-action="toggleGrocery" data-id="${g.id}" aria-label="Mark ${esc(g.name)} as bought">✓</button>
+        <div class="grow"><div class="title">${esc(g.name)}${g.quantity ? ` <span class="muted">· ${esc(g.quantity)}</span>` : ''}</div>
+        <div class="meta">Out since ${fmtShort(g.addedDate)}${g.createdBy ? ` · ${esc(g.createdBy)}` : ''}</div></div></li>`).join('')}</ul>
+      ${toBuy.length > shown.length ? `<p class="small muted" style="margin:8px 0 0">and ${toBuy.length - shown.length} more…</p>` : ''}`
+      : '<p class="empty">Nothing to buy. 🎉</p>'}
+  </div>`;
+
+  return `<div class="home-hello"><h2>${hello}, ${esc(S.me)}</h2>
+      <p class="muted">${new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</p></div>
+    ${expiringCard}${catsCard}${moneyCard}${groceryCard}`;
+}
+
+ACTIONS.openCat = (id) => {
+  S.tab = 'cats'; store.set('tab', 'cats');
+  S.catId = id; store.set('catId', id);
+  render();
+  window.scrollTo(0, 0);
+};
+
+// ============================================================
 // Recent activity (both of you, all modules)
 // ============================================================
 const MODULE_ICONS = { cats: '🐱', weights: '⚖️', feedings: '🍽️', events: '📅', transactions: '💰', groceries: '🛒' };
@@ -597,7 +660,7 @@ function describe(col, x) {
     case 'weights': return `${catName(x.catId)}'s weight · ${fmtKg(x.kg)}`;
     case 'feedings': return `${catName(x.catId)}'s meal at ${x.time}${x.food ? ` (${x.food})` : ''}`;
     case 'events': return `${catName(x.catId)} · ${x.type} on ${fmtShort(x.date)}`;
-    case 'transactions': return `${x.type === 'income' ? 'Income' : 'Spending'} · ${x.description || x.category || ''} ${money(x.amount)}`;
+    case 'transactions': return `${x.type === 'income' ? 'Income' : 'Spending'} · ${x.description || x.category || ''} ${money(x.amount)}${personOf(x) ? ` (${personOf(x) === S.me ? 'yours' : `${personOf(x)}'s`})` : ''}`;
     case 'groceries': return x.name;
     default: return '';
   }
@@ -949,13 +1012,34 @@ const EXPENSE_CATS = ['Groceries', 'Rent / Mortgage', 'Utilities', 'Transport', 
   'Entertainment', 'Bills & subscriptions', 'Savings', 'Gifts', 'Other'];
 const INCOME_CATS = ['Salary', 'Bonus', 'Side income', 'Refund', 'Other'];
 
+// The two of you: whoever has signed in, plus anyone who owns an entry. You come first.
+function people() {
+  const set = new Set([S.me, ...(S.db.settings.people || [])]);
+  for (const t of S.db.transactions) set.add(personOf(t));
+  return [...set].filter(Boolean).sort((a, b) => (a === S.me ? -1 : b === S.me ? 1 : a.localeCompare(b)));
+}
+const personOf = (t) => t.person || t.createdBy || '';
+const whoLabel = (p) => (p === S.me ? 'Mine' : p);
+// Which person the Money tab is showing: a name, or 'all' for both of you.
+function moneyWho() {
+  if (S.moneyWho === 'all') return 'all';
+  if (S.moneyWho === 'me' || !people().includes(S.moneyWho)) return S.me;
+  return S.moneyWho;
+}
+
+function monthTotals(month, who) {
+  const tx = S.db.transactions.filter((t) => t.month === month && (who === 'all' || personOf(t) === who));
+  const sum = (type) => tx.filter((t) => t.type === type).reduce((n, t) => n + t.amount, 0);
+  const inc = sum('income'), exp = sum('expense');
+  return { tx, inc, exp, left: inc - exp };
+}
+
 function renderMoney() {
-  const tx = S.db.transactions.filter((t) => t.month === S.month);
-  const byDate = (a, b) => (b.date || '').localeCompare(a.date || '') || b.createdAt.localeCompare(a.createdAt);
+  const who = moneyWho();
+  const { tx, inc, exp, left } = monthTotals(S.month, who);
+  const byDate = (a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt || '').localeCompare(a.createdAt || '');
   const income = tx.filter((t) => t.type === 'income').sort(byDate);
   const expenses = tx.filter((t) => t.type === 'expense').sort(byDate);
-  const sum = (arr) => arr.reduce((s, t) => s + t.amount, 0);
-  const inc = sum(income), exp = sum(expenses), left = inc - exp;
   const pct = inc > 0 ? Math.min(100, (exp / inc) * 100) : (exp > 0 ? 100 : 0);
 
   const cats = {};
@@ -964,12 +1048,19 @@ function renderMoney() {
   const maxCat = catRows[0]?.[1] || 1;
 
   const txItem = (t) => `<li class="clickable" data-action="editTx" data-id="${t.id}">
+    ${who === 'all' ? personDot(personOf(t)) : ''}
     <div class="grow"><div class="title">${esc(t.description || t.category || (t.type === 'income' ? 'Income' : 'Expense'))}</div>
-    <div class="meta">${[t.description ? t.category : '', fmtShort(t.date)].filter(Boolean).map(esc).join(' · ')}</div>
+    <div class="meta">${[who === 'all' ? personOf(t) : '', t.description ? t.category : '', fmtShort(t.date)].filter(Boolean).map(esc).join(' · ')}</div>
     <div class="meta">${byline(t)}</div></div>
     <span class="amount ${t.type}">${t.type === 'income' ? '+' : '−'}${money(t.amount)}</span></li>`;
 
+  const prevIncome = S.db.transactions.filter((t) => t.month === shiftMonth(S.month, -1) && t.type === 'income' && (who === 'all' || personOf(t) === who));
+  const tabs = [...people(), 'all'];
+  const whose = who === 'all' ? 'Both of you' : who === S.me ? 'Your' : `${who}'s`;
+
   return `
+    <div class="seg money-tabs" role="tablist">${tabs.map((p) => `<button role="tab" data-action="moneyWho" data-id="${esc(p)}"
+      aria-selected="${p === who}">${p === 'all' ? '👫 Both' : `${personDot(p)}${esc(whoLabel(p))}`}</button>`).join('')}</div>
     <div class="month-nav">
       <button class="btn icon" data-action="month" data-id="-1" aria-label="Previous month">‹</button>
       <h2>${fmtMonth(S.month)}</h2>
@@ -981,13 +1072,14 @@ function renderMoney() {
       <div class="stat"><span>Spent</span><strong class="amount expense">${money(exp)}</strong></div>
       <div class="stat"><span>${left < 0 ? 'Over by' : 'Left'}</span><strong class="amount" style="color:${left < 0 ? 'var(--danger)' : 'inherit'}">${money(Math.abs(left))}</strong></div>
     </div>
+    ${who === 'all' ? `<div class="card"><div class="section-head"><h2>Each of you</h2></div>${people().map((p) => personBalance(p, S.month)).join('')}</div>` : ''}
     <div class="card">
-      <div class="row"><span class="grow small muted">${inc > 0 ? `${Math.round((exp / inc) * 100)}% of income spent` : 'Add this month\'s income to see your budget'}</span></div>
+      <div class="row"><span class="grow small muted">${inc > 0 ? `${whose === 'Your' ? 'You have' : whose === 'Both of you' ? 'Together you have' : `${esc(who)} has`} spent ${Math.round((exp / inc) * 100)}% of income` : 'Add this month\'s income to see the balance'}</span></div>
       <div class="meter ${exp > inc && inc > 0 ? 'over' : ''}"><div style="width:${pct}%"></div></div>
       <div class="row wrap" style="margin-top:12px">
         <button class="btn primary" data-action="addTx" data-id="expense">＋ Spending</button>
         <button class="btn" data-action="addTx" data-id="income">＋ Income</button>
-        ${!tx.length && S.db.transactions.some((t) => t.month === shiftMonth(S.month, -1) && t.type === 'income')
+        ${!tx.some((t) => t.type === 'income') && prevIncome.length
           ? `<button class="btn ghost" data-action="copyIncome">Copy last month's income</button>` : ''}
       </div>
     </div>
@@ -1000,13 +1092,34 @@ function renderMoney() {
       ${expenses.length ? `<ul class="list">${expenses.map(txItem).join('')}</ul>` : '<p class="empty">No spending recorded yet.</p>'}</div>`;
 }
 
+// One person's month at a glance (used on Home and in the Both tab).
+function personBalance(p, month) {
+  const { inc, exp, left } = monthTotals(month, p);
+  const pct = inc > 0 ? Math.min(100, (exp / inc) * 100) : (exp > 0 ? 100 : 0);
+  return `<div class="balance clickable" role="button" tabindex="0" data-action="openMoney" data-id="${esc(p)}">
+    <div class="row">${personDot(p)}<strong class="grow">${esc(p === S.me ? `${p} (you)` : p)}</strong>
+      <span class="amount" style="color:${left < 0 ? 'var(--danger)' : 'inherit'}">${left < 0 ? 'Over ' : ''}${money(Math.abs(left))}${left < 0 ? '' : ' left'}</span></div>
+    <div class="meter ${exp > inc && inc > 0 ? 'over' : ''}"><div style="width:${pct}%"></div></div>
+    <div class="meta">Income ${money(inc)} · Spent ${money(exp)}</div>
+  </div>`;
+}
+
+ACTIONS.moneyWho = (p) => { S.moneyWho = p === S.me ? 'me' : p; store.set('moneyWho', S.moneyWho); render(); };
+ACTIONS.openMoney = (p) => {
+  S.tab = 'money'; store.set('tab', 'money');
+  S.month = thisMonth();
+  ACTIONS.moneyWho(p);
+  window.scrollTo(0, 0);
+};
+
 ACTIONS.month = (n) => { S.month = Number(n) === 0 ? thisMonth() : shiftMonth(S.month, Number(n)); render(); };
 
 ACTIONS.copyIncome = async () => {
-  const prev = S.db.transactions.filter((t) => t.month === shiftMonth(S.month, -1) && t.type === 'income');
+  const who = moneyWho();
+  const prev = S.db.transactions.filter((t) => t.month === shiftMonth(S.month, -1) && t.type === 'income' && (who === 'all' || personOf(t) === who));
   for (const t of prev) {
     save('transactions', null, {
-      type: 'income', amount: t.amount, month: S.month, category: t.category, description: t.description,
+      type: 'income', amount: t.amount, month: S.month, category: t.category, description: t.description, person: personOf(t),
       date: S.month === thisMonth() ? today() : S.month + '-01',
     });
   }
@@ -1022,6 +1135,8 @@ function txForm(t, type) {
     meta: history(t),
     fields: [
       { name: 'type', type: 'segment', label: 'Type', value: type, options: [{ value: 'expense', label: 'Spending' }, { value: 'income', label: 'Income' }] },
+      { name: 'person', type: 'segment', label: 'Whose', value: t ? personOf(t) : (moneyWho() === 'all' ? S.me : moneyWho()),
+        options: people().map((p) => ({ value: p, label: p === S.me ? `Mine (${p})` : `${p}'s` })) },
       { name: 'amount', label: `Amount (${S.db.settings.currency})`, type: 'number', step: '0.01', min: 0, required: true, value: t?.amount },
       { name: 'description', label: 'Description', value: t?.description, placeholder: type === 'income' ? 'e.g. My salary' : 'e.g. Electricity bill' },
       { name: 'category', label: 'Category', type: 'select', options: t?.category && !cats.includes(t.category) ? [...cats, t.category] : cats, value: t?.category || cats[0] },
@@ -1029,7 +1144,9 @@ function txForm(t, type) {
     ],
     onSubmit: (v) => {
       v.month = v.date ? v.date.slice(0, 7) : (t?.month || S.month);
-      const msg = v.month !== S.month ? `Saved to ${fmtMonth(v.month)}` : 'Saved';
+      const who = moneyWho();
+      const msg = v.month !== S.month ? `Saved to ${fmtMonth(v.month)}`
+        : who !== 'all' && v.person && v.person !== who ? `Saved to ${v.person === S.me ? 'your' : `${v.person}'s`} tab` : 'Saved';
       return t ? save('transactions', t.id, v, msg) : save('transactions', null, v, msg);
     },
     onDelete: t ? () => remove('transactions', t.id, 'Deleted') : null,

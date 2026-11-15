@@ -284,3 +284,24 @@ dialog h3 { margin: 0 0 16px; font-size: 1.15rem; }
 }
 @media (min-width: 800px) { .tab-badge { position: static; order: 3; } }
 .btn.small { padding: 4px 10px; font-size: .8rem; }
+
+/* ---------- Home ---------- */
+.home-hello { margin: 4px 2px 14px; }
+.home-hello h2 { margin: 0; font-size: 1.35rem; }
+.home-hello p { margin: 2px 0 0; font-size: .9rem; }
+.reminder.clickable, .balance.clickable { cursor: pointer; border-radius: 10px; }
+.reminder.clickable:hover, .balance.clickable:hover { background: var(--surface-2); }
+.balance { padding: 10px 6px; border-top: 1px solid var(--border); }
+.balance:first-of-type { border-top: 0; }
+.balance .person { width: 24px; height: 24px; font-size: .8rem; }
+.balance .meter { margin: 8px 0 4px; }
+.balance .meta { color: var(--muted); font-size: .82rem; }
+
+/* ---------- Money: person tabs ---------- */
+.money-tabs { margin-bottom: 14px; }
+.money-tabs button {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 0;
+  border: 0; background: none; border-radius: 8px; padding: 8px 6px; cursor: pointer; font-size: .9rem; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.money-tabs button[aria-selected="true"] { background: var(--surface); box-shadow: var(--shadow); font-weight: 600; }
