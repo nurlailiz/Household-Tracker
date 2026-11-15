@@ -466,6 +466,19 @@ document.addEventListener('click', (e) => {
   Promise.resolve(ACTIONS[el.dataset.action](el.dataset.id, el)).catch((ex) => toast(ex.message));
 });
 
+// No double-tap zoom. CSS touch-action handles most browsers, but iPhones can still zoom when you
+// double-tap text or empty space, so swallow a second quick tap there. Taps on buttons, ticks and
+// fields always go through, so tapping two things quickly still works. Pinch-to-zoom is untouched.
+const TAPPABLE = 'button, a, input, select, textarea, label, summary, [data-action], [data-tab], [role=button], [contenteditable]';
+let lastTouchEnd = 0;
+document.addEventListener('touchend', (e) => {
+  const now = Date.now();
+  const quick = now - lastTouchEnd < 350;
+  lastTouchEnd = now;
+  if (quick && e.touches.length === 0 && e.changedTouches.length === 1 && !e.target.closest?.(TAPPABLE)) e.preventDefault();
+}, { passive: false });
+document.addEventListener('dblclick', (e) => { if (!e.target.closest?.('input, textarea, [contenteditable]')) e.preventDefault(); });
+
 document.addEventListener('keydown', (e) => {
   if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role=button][data-action]')) { e.preventDefault(); e.target.click(); }
 });
