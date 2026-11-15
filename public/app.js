@@ -464,12 +464,125 @@ const ACTIONS = {};
 
 ACTIONS.settings = () => openForm({
   title: 'Settings',
+  meta: `<p style="margin:-4px 0 14px"><button type="button" class="btn" data-action="openImport">📥 Import cat records…</button></p>`,
   fields: [{ name: 'currency', label: 'Currency symbol', value: S.db.settings.currency, required: true, placeholder: 'e.g. $, RM, £, €' }],
   onSubmit: (v) => saveSettings({ currency: v.currency.trim().slice(0, 6) || '$' }, 'Settings saved'),
   onDelete: () => signOut(auth),
   deleteLabel: 'Sign out',
   confirmDelete: false,
 });
+
+// ============================================================
+// Import (Settings → Import cat records)
+// File format: { "format": "our-home-import", "cats": [ { name, sex, birthday, breed, color, microchip, notes,
+//   weights: [{ date, kg, notes }], events: [{ type, date, nextDue, notes }], feedings: [{ time, food, amount, notes }] } ] }
+// Cats are matched to existing ones by name; records already in the app are skipped, so importing twice is safe.
+// ============================================================
+function planImport(data) {
+  if (!data || !Array.isArray(data.cats)) throw new Error("This doesn't look like an Our Home import file.");
+  return data.cats.map((c) => {
+    const profile = clean('cats', c, false);
+    const existing = S.db.cats.find((x) => x.name.trim().toLowerCase() === profile.name.toLowerCase());
+    const mine = (col) => (existing ? S.db[col].filter((x) => x.catId === existing.id) : []);
+    const child = (col, list, same) => {
+      const rows = (list || []).map((x) => { const { catId, ...rest } = clean(col, { ...x, catId: '-' }, false); return rest; });
+      const fresh = rows.filter((r) => !mine(col).some((x) => same(x, r)));
+      return { fresh, skipped: rows.length - fresh.length };
+    };
+    const weights = child('weights', c.weights, (a, b) => a.date === b.date && Number(a.kg) === b.kg);
+    const events = child('events', c.events, (a, b) => a.type === b.type && a.date === b.date);
+    const feedings = child('feedings', c.feedings, (a, b) => a.time === b.time);
+    // For a cat already in the app, only fill in profile fields that are still empty.
+    const fill = existing ? Object.fromEntries(Object.entries(profile).filter(([k, v]) => k !== 'name' && v && !existing[k])) : {};
+    return {
+      name: profile.name, profile, existing, fill,
+      weights: weights.fresh, events: events.fresh, feedings: feedings.fresh,
+      skipped: weights.skipped + events.skipped + feedings.skipped,
+      count: (existing ? (Object.keys(fill).length ? 1 : 0) : 1) + weights.fresh.length + events.fresh.length + feedings.fresh.length,
+    };
+  });
+}
+
+function runImport(plan) {
+  const batch = writeBatch(fdb);
+  const now = new Date().toISOString();
+  const stamp = { createdBy: S.me, createdAt: now, updatedAt: now };
+  for (const c of plan) {
+    let catId = c.existing?.id;
+    if (!catId) {
+      const ref = doc(collection(fdb, 'cats'));
+      catId = ref.id;
+      batch.set(ref, { ...c.profile, ...stamp });
+    } else if (Object.keys(c.fill).length) {
+      batch.update(doc(fdb, 'cats', catId), { ...c.fill, updatedBy: S.me, updatedAt: now });
+    }
+    for (const [col, rows] of [['weights', c.weights], ['events', c.events], ['feedings', c.feedings]]) {
+      for (const r of rows) batch.set(doc(collection(fdb, col)), { ...r, catId, ...stamp });
+    }
+  }
+  background(batch.commit());
+}
+
+ACTIONS.openImport = () => {
+  const modal = $('#modal');
+  if (modal.open) modal.close();
+  modal.innerHTML = `<form id="importForm">
+    <h3>📥 Import cat records</h3>
+    <p class="small muted" style="margin-top:-8px">Choose the import file, or paste its contents. You'll see what will be added before anything is saved.</p>
+    <p><label class="btn">Choose file<input type="file" id="importFile" accept=".json,application/json,text/plain" hidden></label></p>
+    <label class="field"><span>…or paste it here</span><textarea id="importText" rows="4" spellcheck="false"></textarea></label>
+    <div id="importPreview"></div>
+    <p class="form-error" id="importError"></p>
+    <div class="modal-actions"><span class="spacer"></span>
+      <button type="button" class="btn" id="importCancel">Cancel</button>
+      <button type="submit" class="btn primary" id="importGo" disabled>Import</button></div>
+  </form>`;
+  let plan = null;
+  const err = $('#importError', modal), go = $('#importGo', modal), preview = $('#importPreview', modal);
+  const update = () => {
+    plan = null; go.disabled = true; err.textContent = ''; preview.innerHTML = '';
+    const text = $('#importText', modal).value.trim();
+    if (!text) return;
+    try {
+      plan = planImport(JSON.parse(text));
+    } catch (e) {
+      err.textContent = e instanceof SyntaxError ? "Couldn't read that. Make sure you pasted the whole file." : e.message;
+      return;
+    }
+    const total = plan.reduce((n, c) => n + c.count, 0);
+    const parts = (c) => [
+      c.weights.length && `${c.weights.length} weight${c.weights.length === 1 ? '' : 's'}`,
+      c.events.length && `${c.events.length} date${c.events.length === 1 ? '' : 's'}`,
+      c.feedings.length && `${c.feedings.length} meal${c.feedings.length === 1 ? '' : 's'}`,
+    ].filter(Boolean).join(' · ') || 'nothing new';
+    preview.innerHTML = `<ul class="list">${plan.map((c) => `<li><div class="grow">
+      <div class="title">${esc(c.name)} <span class="badge ${c.existing ? '' : 'ok'}">${c.existing ? 'already in app' : 'new cat'}</span></div>
+      <div class="meta">${parts(c)}${c.skipped ? ` · ${c.skipped} already in the app (skipped)` : ''}</div></div></li>`).join('')}</ul>`;
+    go.disabled = total === 0;
+    go.textContent = total ? `Import ${total} record${total === 1 ? '' : 's'}` : 'Nothing new to import';
+  };
+  $('#importText', modal).addEventListener('input', update);
+  $('#importFile', modal).addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    $('#importText', modal).value = await file.text();
+    update();
+  });
+  $('#importCancel', modal).onclick = () => modal.close();
+  $('#importForm', modal).onsubmit = (e) => {
+    e.preventDefault();
+    if (!plan) return;
+    runImport(plan);
+    S.catId = 'all';
+    store.set('catId', 'all');
+    S.tab = 'cats';
+    store.set('tab', 'cats');
+    modal.close();
+    render();
+    toast('Imported. Both phones will see it shortly.');
+  };
+  modal.showModal();
+};
 
 // ============================================================
 // Recent activity (both of you, all modules)
@@ -480,7 +593,7 @@ function describe(col, x) {
   const catName = (id) => S.db.cats.find((c) => c.id === id)?.name || 'a cat';
   switch (col) {
     case 'cats': return `${x.name}'s profile`;
-    case 'weights': return `${catName(x.catId)}'s weight · ${x.kg} kg`;
+    case 'weights': return `${catName(x.catId)}'s weight · ${fmtKg(x.kg)}`;
     case 'feedings': return `${catName(x.catId)}'s meal at ${x.time}${x.food ? ` (${x.food})` : ''}`;
     case 'events': return `${catName(x.catId)} · ${x.type} on ${fmtShort(x.date)}`;
     case 'transactions': return `${x.type === 'income' ? 'Income' : 'Spending'} · ${x.description || x.category || ''} ${money(x.amount)}`;
@@ -521,8 +634,13 @@ ACTIONS.activity = () => {
 // ============================================================
 // Cats
 // ============================================================
-const EVENT_TYPES = ['Vaccination', 'Deflea', 'Deworm', 'Vet visit', 'Grooming', 'Medication', 'Birthday', 'Other'];
-const EVENT_ICONS = { Vaccination: '💉', Deflea: '🪲', Deworm: '💊', 'Vet visit': '🩺', Grooming: '✂️', Medication: '💊', Birthday: '🎂' };
+const EVENT_TYPES = ['Vaccination', 'Deworm + flea', 'Deflea', 'Deworm', 'Vet visit', 'Test / lab result', 'Medication',
+  'Health note', 'Weigh-in', 'Neuter', 'Grooming', 'Adopted', 'Birthday', 'Other'];
+const EVENT_ICONS = {
+  Vaccination: '💉', 'Deworm + flea': '🛡️', Deflea: '🪲', Deworm: '💊', 'Vet visit': '🩺', 'Test / lab result': '🧪',
+  Medication: '💊', 'Health note': '📝', 'Weigh-in': '⚖️', Neuter: '🏥', Grooming: '✂️', Adopted: '🏠', Birthday: '🎂',
+};
+const shorten = (t, n = 70) => (t && t.length > n ? t.slice(0, n - 1).trimEnd() + '…' : t || '');
 
 function currentCat() {
   const cats = S.db.cats;
@@ -545,21 +663,31 @@ const catColor = (cat) => {
 };
 const weightsOf = (catId) => S.db.weights.filter((w) => w.catId === catId)
   .sort((a, b) => a.date.localeCompare(b.date) || (a.createdAt || '').localeCompare(b.createdAt || ''));
-const kgDiff = (a, b) => Math.round((a - b) * 100) / 100;
-const diffBadge = (d) => d ? `<span class="badge">${d > 0 ? '▲ +' : '▼ '}${d} kg</span>` : '';
+// Kittens: show grams under 1 kg ("843 g"), kilograms above ("1.05 kg").
+const fmtKg = (kg) => (kg < 1 ? `${Math.round(kg * 1000)} g` : `${+Number(kg).toFixed(3)} kg`);
+const kgDiff = (a, b) => Math.round((a - b) * 1000) / 1000;
+const diffBadge = (d) => {
+  if (!d) return '';
+  const amount = Math.abs(d) < 1 ? `${Math.round(Math.abs(d) * 1000)} g` : `${+Math.abs(d).toFixed(2)} kg`;
+  return `<span class="badge">${d > 0 ? '▲ +' : '▼ −'}${amount}</span>`;
+};
 
-function upcomingReminders() {
-  // The latest event of each (cat, type) with a next-due date within 30 days (or overdue).
+// Everything due, soonest first:
+// - the "next due" date of the latest done event of each (cat, type)
+// - planned events (dated in the future)
+function dueList() {
+  const t = today();
   const latest = new Map();
   for (const e of S.db.events) {
-    const key = e.catId + '|' + e.type;
-    const prev = latest.get(key);
+    if (e.date > t) continue;
+    const key = e.catId + '|' + e.type, prev = latest.get(key);
     if (!prev || e.date > prev.date) latest.set(key, e);
   }
-  return [...latest.values()]
-    .filter((e) => e.nextDue && daysUntil(e.nextDue) <= 30)
-    .sort((a, b) => a.nextDue.localeCompare(b.nextDue));
+  const items = [...latest.values()].filter((e) => e.nextDue).map((e) => ({ e, due: e.nextDue, planned: false }));
+  for (const e of S.db.events) if (e.date > t) items.push({ e, due: e.date, planned: true });
+  return items.sort((a, b) => a.due.localeCompare(b.due));
 }
+const upcomingReminders = () => dueList().filter((x) => daysUntil(x.due) <= 30);
 
 function renderCats() {
   const cats = S.db.cats;
@@ -581,9 +709,11 @@ function renderCats() {
   const catById = Object.fromEntries(cats.map((c) => [c.id, c]));
   const remindersHtml = reminders.length ? `<div class="card">
       <div class="section-head"><h2>⏰ Coming up</h2></div>
-      ${reminders.map((e) => `<div class="reminder">${avatar(catById[e.catId])}
+      ${reminders.filter((r) => catById[r.e.catId]).slice(0, S.showAllReminders ? undefined : 5).map(({ e, due, planned }) => `<div class="reminder">${avatar(catById[e.catId])}
         <div class="grow"><div><strong>${esc(catById[e.catId].name)}</strong> · ${esc(e.type)}</div>
-        <div class="meta muted small">Last done ${fmtDate(e.date)}</div></div>${dueBadge(e.nextDue)}</div>`).join('')}
+        <div class="meta muted small">${planned ? 'Planned' : `Last ${fmtShort(e.date)}`}${e.notes ? ' · ' + esc(shorten(e.notes)) : ''}</div></div>
+        ${dueBadge(due)}</div>`).join('')}
+      ${reminders.length > 5 ? `<button class="btn ghost" data-action="toggleReminders">${S.showAllReminders ? 'Show less' : `Show all ${reminders.length}`}</button>` : ''}
     </div>` : '';
 
   if (!cat) return chips + remindersHtml + renderCatsOverview();
@@ -595,7 +725,7 @@ function renderCats() {
 
   const facts = [
     ['Age', age(cat.birthday)], ['Birthday', fmtDate(cat.birthday)], ['Sex', cat.sex], ['Breed', cat.breed],
-    ['Colour', cat.color], ['Microchip', cat.microchip], ['Weight', latestW ? `${latestW.kg} kg` : ''],
+    ['Colour', cat.color], ['Microchip', cat.microchip], ['Weight', latestW ? fmtKg(latestW.kg) : ''],
   ].filter(([, v]) => v);
 
   const profile = `<div class="card">
@@ -614,7 +744,7 @@ function renderCats() {
     ${weights.length ? `<ul class="list">${weights.slice().reverse().slice(0, S.showAllWeights ? undefined : 6).map((w) => {
       const i = weights.indexOf(w), prev = weights[i - 1];
       return `<li class="clickable" data-action="editWeight" data-id="${w.id}">
-        <div class="grow"><div class="title">${w.kg} kg</div><div class="meta">${fmtDate(w.date)}${w.notes ? ' · ' + esc(w.notes) : ''}</div>
+        <div class="grow"><div class="title">${fmtKg(w.kg)}</div><div class="meta">${fmtDate(w.date)}${w.notes ? ' · ' + esc(w.notes) : ''}</div>
         <div class="meta">${byline(w)}</div></div>
         ${prev ? diffBadge(kgDiff(w.kg, prev.kg)) : ''}</li>`;
     }).join('')}</ul>
@@ -636,9 +766,9 @@ function renderCats() {
     ${events.length ? `<ul class="list">${events.map((e) => `<li class="clickable" data-action="editEvent" data-id="${e.id}">
       <span style="font-size:1.4rem" aria-hidden="true">${EVENT_ICONS[e.type] || '📌'}</span>
       <div class="grow"><div class="title">${esc(e.type)}</div>
-      <div class="meta">${fmtDate(e.date)}${e.nextDue ? ` · next ${fmtDate(e.nextDue)}` : ''}${e.notes ? ' · ' + esc(e.notes) : ''}</div>
+      <div class="meta">${e.date > today() ? `Planned for ${fmtDate(e.date)}` : fmtDate(e.date)}${e.nextDue ? ` · next ${fmtDate(e.nextDue)}` : ''}${e.notes ? ' · ' + esc(e.notes) : ''}</div>
       <div class="meta">${byline(e)}</div></div>
-      ${e.nextDue ? dueBadge(e.nextDue) : ''}</li>`).join('')}</ul>`
+      ${e.date > today() ? dueBadge(e.date) : e.nextDue ? dueBadge(e.nextDue) : ''}</li>`).join('')}</ul>`
     : `<p class="empty">Record vaccines, deflea and deworm treatments, vet visits and more. Set a "next due" date to get a reminder.</p>`}
   </div>`;
 
@@ -669,7 +799,7 @@ function weightChart(series) {
       ? `<path class="area" d="${d}L${x(s.points[s.points.length - 1].date).toFixed(1)},${H - P.b}L${x(s.points[0].date).toFixed(1)},${H - P.b}Z"/>` : '';
     return `${area}${s.points.length > 1 ? `<path class="line" d="${d}"${stroke}/>` : ''}
       ${s.points.map((w) => `<circle class="dot" cx="${x(w.date)}" cy="${y(w.kg)}" r="3.5"${stroke}>
-        <title>${esc(s.name)} · ${fmtDate(w.date)}: ${w.kg} kg</title></circle>`).join('')}`;
+        <title>${esc(s.name)} · ${fmtDate(w.date)}: ${fmtKg(w.kg)}</title></circle>`).join('')}`;
   }).join('');
 
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Weight over time">
@@ -692,11 +822,11 @@ function renderCatsOverview() {
     ${withWeights.length ? weightChart(withWeights) + `<div class="legend">${withWeights.map((s) => {
       const lastW = s.points[s.points.length - 1];
       return `<button class="legend-item" data-action="pickCat" data-id="${s.cat.id}">
-        <i style="background:${s.color}"></i>${esc(s.name)} <strong>${lastW.kg} kg</strong></button>`;
+        <i style="background:${s.color}"></i>${esc(s.name)} <strong>${fmtKg(lastW.kg)}</strong></button>`;
     }).join('')}</div>` : '<p class="empty">No weigh-ins yet. Log a weight to see the graph.</p>'}
   </div>`;
 
-  const nextDue = (catId) => upcomingAll().find((e) => e.catId === catId);
+  const nextDue = (catId) => dueList().find((x) => x.e.catId === catId);
   const cards = cats.map((c) => {
     const ws = weightsOf(c.id), lastW = ws[ws.length - 1], prevW = ws[ws.length - 2];
     const meals = S.db.feedings.filter((f) => f.catId === c.id).sort((a, b) => a.time.localeCompare(b.time));
@@ -709,8 +839,8 @@ function renderCatsOverview() {
         <div class="meta">${esc([c.sex, age(c.birthday)].filter(Boolean).join(' · ') || c.breed || '')}</div></div>
         <span class="muted" aria-hidden="true">›</span></div>
       <dl>
-        <div><dt>Weight</dt><dd>${lastW ? `${lastW.kg} kg ${prevW ? diffBadge(kgDiff(lastW.kg, prevW.kg)) : ''}<span class="meta"> · ${fmtShort(lastW.date)}</span>` : '<span class="muted">—</span>'}</dd></div>
-        <div><dt>Next up</dt><dd>${due ? `${esc(due.type)} ${dueBadge(due.nextDue)}` : '<span class="muted">Nothing scheduled</span>'}</dd></div>
+        <div><dt>Weight</dt><dd>${lastW ? `${fmtKg(lastW.kg)} ${prevW ? diffBadge(kgDiff(lastW.kg, prevW.kg)) : ''}<span class="meta"> · ${fmtShort(lastW.date)}</span>` : '<span class="muted">—</span>'}</dd></div>
+        <div><dt>Next up</dt><dd>${due ? `${esc(due.e.type)} ${dueBadge(due.due)}` : '<span class="muted">Nothing scheduled</span>'}</dd></div>
         <div><dt>Meals</dt><dd>${meals.length ? meals.map((m) => esc(m.time)).join(', ') : '<span class="muted">—</span>'}</dd></div>
       </dl>
       <div class="small">${byline(latest)}</div>
@@ -720,18 +850,10 @@ function renderCatsOverview() {
   return chartCard + `<div class="cat-grid">${cards}</div>`;
 }
 
-// Latest next-due date per (cat, type), soonest first — no 30-day limit.
-function upcomingAll() {
-  const latest = new Map();
-  for (const e of S.db.events) {
-    const key = e.catId + '|' + e.type, prev = latest.get(key);
-    if (!prev || e.date > prev.date) latest.set(key, e);
-  }
-  return [...latest.values()].filter((e) => e.nextDue).sort((a, b) => a.nextDue.localeCompare(b.nextDue));
-}
 
 ACTIONS.pickCat = (id) => { S.catId = id; store.set('catId', id); render(); };
 ACTIONS.toggleWeights = () => { S.showAllWeights = !S.showAllWeights; render(); };
+ACTIONS.toggleReminders = () => { S.showAllReminders = !S.showAllReminders; render(); };
 
 function catForm(cat) {
   openForm({
@@ -769,7 +891,7 @@ function weightForm(w) {
     meta: history(w),
     fields: [
       ...(needsCat ? [{ name: 'catId', label: 'Cat', type: 'select', required: true, value: cats[0]?.id, options: cats.map((c) => ({ value: c.id, label: c.name })) }] : []),
-      { name: 'kg', label: 'Weight (kg)', type: 'number', step: '0.01', min: 0, required: true, value: w?.kg },
+      { name: 'kg', label: 'Weight (kg)', type: 'number', step: '0.001', min: 0, required: true, value: w?.kg, placeholder: 'e.g. 0.85 for 850 g' },
       { name: 'date', label: 'Date', type: 'date', required: true, value: w?.date || today() },
       { name: 'notes', label: 'Notes', value: w?.notes },
     ],
@@ -807,7 +929,7 @@ function eventForm(ev) {
     meta: history(ev),
     fields: [
       { name: 'type', label: 'What', type: 'select', options: types, required: true, value: ev?.type || 'Vaccination' },
-      { name: 'date', label: 'Date done', type: 'date', required: true, value: ev?.date || today() },
+      { name: 'date', label: 'Date (done, or planned)', type: 'date', required: true, value: ev?.date || today() },
       { name: 'nextDue', label: 'Next due (optional)', type: 'date', value: ev?.nextDue },
       { name: 'notes', label: 'Notes', value: ev?.notes, placeholder: 'e.g. Brand, vet clinic, batch no.' },
     ],
