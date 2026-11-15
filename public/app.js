@@ -136,7 +136,7 @@ const S = {
 // Field types per collection: used to clean form values before saving.
 const SCHEMA = {
   cats: { name: 'str!', breed: 'str', sex: 'str', birthday: 'str', color: 'str', microchip: 'str', notes: 'str', photo: 'str',
-    fivFelv: 'str', fivFelvDate: 'str', vaccineStatus: 'str' },
+    fivFelv: 'str', fivFelvDate: 'str', vaccineStatus: 'str', adopted: 'str' },
   weights: { catId: 'str!', date: 'str!', kg: 'num!', notes: 'str' },
   feedings: { catId: 'str!', time: 'str!', food: 'str', amount: 'str', notes: 'str' },
   events: { catId: 'str!', type: 'str!', date: 'str!', nextDue: 'str', notes: 'str' },
@@ -224,7 +224,7 @@ function startSync() {
   const ready = (name) => {
     if (!waiting.size) return scheduleRender();
     waiting.delete(name);
-    if (!waiting.size) { render(); migrateFivFelv(); }
+    if (!waiting.size) { render(); tidyCatProfiles(); }
   };
   const onError = (e) => {
     console.error(e);
@@ -862,20 +862,50 @@ function healthFacts(cat) {
     <div class="facts health">${rows.map(([k, v]) => `<div><span>${k}</span>${v}</div>`).join('')}</div>`;
 }
 
-// One-time tidy-up: move "FIV/FeLV negative…" from a cat's notes into its FIV/FeLV field.
-let fivMigrated = false;
-function migrateFivFelv() {
-  if (fivMigrated) return;
-  fivMigrated = true;
+// ---------- Adopted date ----------
+const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+// "Adopted 14 Oct 2026." / "Rescue, adopted 25 Oct 2026." inside notes.
+const ADOPTED_IN_NOTES = /\b(Rescue,\s*)?adopted\s+(\d{1,2})\s+([A-Za-z]{3})[a-z]*\s+(\d{4})\.?[ \t]*/i;
+
+// The profile field, or (until it's set) the "Adopted" entry in Important dates, or the date written in the notes.
+function adoptedOf(cat) {
+  if (cat.adopted) return cat.adopted;
+  const e = S.db.events.filter((x) => x.catId === cat.id && /adopt/i.test(x.type)).sort((a, b) => a.date.localeCompare(b.date))[0];
+  if (e) return e.date;
+  const m = (cat.notes || '').match(ADOPTED_IN_NOTES);
+  const mon = m && MONTHS[m[3].toLowerCase()];
+  return mon ? `${m[4]}-${pad(mon)}-${pad(m[2])}` : '';
+}
+
+// One-time tidy-up: move FIV/FeLV results and adoption dates out of a cat's notes into their own fields.
+let catsTidied = false;
+function tidyCatProfiles() {
+  if (catsTidied) return;
+  catsTidied = true;
   const now = new Date().toISOString();
   const batch = writeBatch(fdb);
   let changes = 0;
   for (const cat of S.db.cats) {
-    if (cat.fivFelv) continue;
-    const found = fivFelvOf(cat);
-    if (!found) continue;
-    const notes = (cat.notes || '').replace(/^[ \t]*FIV\s*\/\s*FeLV[^\n]*(\n|$)/gim, '').trim();
-    batch.update(doc(fdb, 'cats', cat.id), { fivFelv: found.result, fivFelvDate: found.date, notes, updatedBy: S.me, updatedAt: now });
+    const update = {};
+    let notes = cat.notes || '';
+    if (!cat.fivFelv) {
+      const found = fivFelvOf(cat);
+      if (found) {
+        Object.assign(update, { fivFelv: found.result, fivFelvDate: found.date });
+        notes = notes.replace(/^[ \t]*FIV\s*\/\s*FeLV[^\n]*(\n|$)/gim, '');
+      }
+    }
+    if (!cat.adopted) {
+      const date = adoptedOf(cat);
+      if (date) {
+        update.adopted = date;
+        // Keep "Rescue." if it was part of the sentence.
+        notes = notes.replace(ADOPTED_IN_NOTES, (_, rescue) => (rescue ? 'Rescue. ' : ''));
+      }
+    }
+    if (!Object.keys(update).length) continue;
+    notes = notes.split('\n').map((l) => l.replace(/[ \t]+$/, '')).join('\n').trim();
+    batch.update(doc(fdb, 'cats', cat.id), { ...update, notes, updatedBy: S.me, updatedAt: now });
     changes++;
   }
   if (changes) background(batch.commit());
@@ -916,7 +946,7 @@ function renderCats() {
   const events = S.db.events.filter((e) => e.catId === cat.id).sort((a, b) => b.date.localeCompare(a.date));
 
   const facts = [
-    ['Age', age(cat.birthday)], ['Birthday', fmtDate(cat.birthday)], ['Sex', cat.sex], ['Breed', cat.breed],
+    ['Age', age(cat.birthday)], ['Birthday', fmtDate(cat.birthday)], ['Adopted', fmtDate(adoptedOf(cat))], ['Sex', cat.sex], ['Breed', cat.breed],
     ['Colour', cat.color], ['Microchip', cat.microchip], ['Weight', latestW ? fmtKg(latestW.kg) : ''],
   ].filter(([, v]) => v);
 
@@ -1058,6 +1088,7 @@ function catForm(cat) {
       { name: 'breed', label: 'Breed', value: cat?.breed, placeholder: 'e.g. Domestic shorthair' },
       { name: 'sex', label: 'Sex', type: 'select', options: ['', 'Female', 'Male'], value: cat?.sex || '' },
       { name: 'birthday', label: 'Birthday (or estimate)', type: 'date', value: cat?.birthday },
+      { name: 'adopted', label: 'Adopted on', type: 'date', value: (cat && adoptedOf(cat)) || '' },
       { name: 'color', label: 'Colour / markings', value: cat?.color },
       { name: 'microchip', label: 'Microchip no.', value: cat?.microchip },
       { name: 'fivFelv', label: 'FIV/FeLV result', type: 'select', value: (cat && fivFelvOf(cat)?.result) || '',

@@ -18,7 +18,7 @@ The first screen: an overview of everything.
 - Each person appears after they've signed in once.
 
 ### 🐱 Cats
-- **Profiles** for multiple cats: photo, breed, sex, birthday (age worked out for you), colour, microchip and notes
+- **Profiles** for multiple cats: photo, breed, sex, birthday (age worked out for you), **adopted date**, colour, microchip and notes
 - **🩺 Health** on each profile:
   - **FIV/FeLV** result and test date (a profile field; edit it with **Edit**)
   - **Vaccination** status: *1st dose done*, *2nd dose done*, then *Fully vaccinated* after **3 doses**, worked out from the Vaccination entries in Important dates (the number of shots, or "dose 3" / *final* / *booster* in a note). Before that it shows the next dose date; once fully vaccinated it shows the **yearly booster**, a year after the last shot unless you entered a different next-due date. The booster also appears in Coming up and on Home. You can set the status by hand in **Edit**.
