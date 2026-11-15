@@ -647,9 +647,9 @@ function renderHome() {
   const catsCard = `<div class="card">
     <div class="section-head"><h2>🐾 Cats · next up</h2>${more('cats')}</div>
     ${!S.db.cats.length ? '<p class="empty">No cats yet.</p>'
-      : due.length ? due.map(({ e, due: d, planned }) => `<div class="reminder clickable" role="button" tabindex="0" data-action="openCat" data-id="${e.catId}">
+      : due.length ? due.map(({ e, due: d, planned, label }) => `<div class="reminder clickable" role="button" tabindex="0" data-action="openCat" data-id="${e.catId}">
           ${avatar(catById[e.catId])}
-          <div class="grow"><div><strong>${esc(catById[e.catId].name)}</strong> · ${EVENT_ICONS[e.type] || '📌'} ${esc(e.type)}</div>
+          <div class="grow"><div><strong>${esc(catById[e.catId].name)}</strong> · ${EVENT_ICONS[e.type] || '📌'} ${esc(label || e.type)}</div>
           <div class="meta muted small">${planned ? 'Planned' : `Last ${fmtShort(e.date)}`}${e.notes ? ' · ' + esc(shorten(e.notes, 60)) : ''}</div></div>
           ${dueBadge(d)}</div>`).join('')
       : '<p class="empty">Nothing scheduled. Add a "next due" date to a vaccine, deworm or vet visit.</p>'}
@@ -790,7 +790,15 @@ function dueList() {
     const key = e.catId + '|' + e.type, prev = latest.get(key);
     if (!prev || e.date > prev.date) latest.set(key, e);
   }
-  const items = [...latest.values()].filter((e) => e.nextDue).map((e) => ({ e, due: e.nextDue, planned: false }));
+  const items = [];
+  for (const e of latest.values()) {
+    if (/vaccin/i.test(e.type)) {
+      // Vaccines: next dose, or the yearly booster once fully vaccinated.
+      const cat = S.db.cats.find((c) => c.id === e.catId);
+      const vac = cat && vaccinationOf(cat);
+      if (vac?.next) items.push({ e, due: vac.next, planned: false, label: vac.full ? 'Yearly booster' : e.type });
+    } else if (e.nextDue) items.push({ e, due: e.nextDue, planned: false });
+  }
   for (const e of S.db.events) if (e.date > t) items.push({ e, due: e.date, planned: true });
   return items.sort((a, b) => a.due.localeCompare(b.due));
 }
@@ -812,17 +820,21 @@ function fivFelvOf(cat) {
 function ordinal(n) { return `${n}${['th', 'st', 'nd', 'rd'][(n % 100 >> 3) ^ 1 && n % 10] || 'th'}`; }
 
 // Vaccination status: set by hand in the profile, or worked out from Vaccination entries.
+// 3 doses = fully vaccinated; after that it's a yearly booster, due a year after the last shot
+// (unless a different "next due" date was entered).
+const FULL_DOSES = 3;
+const addYear = (d) => { const x = parseDate(d); x.setFullYear(x.getFullYear() + 1); return toISO(x); };
 function vaccinationOf(cat) {
   const shots = pastEvents(cat.id).filter((e) => /vaccin/i.test(e.type));
   const latest = shots[0];
-  const next = latest?.nextDue || '';
-  if (cat.vaccineStatus) return { status: cat.vaccineStatus, latest, next, full: cat.vaccineStatus === 'Fully vaccinated' };
-  if (!latest) return null;
-  const full = shots.some((e) => /\b(final|fully|complete[d]?|booster)\b/i.test(e.notes || ''));
-  if (full) return { status: 'Fully vaccinated', latest, next, full: true };
-  // Dose number: "Vaccine 2" / "dose 3" in the notes of the latest shot, otherwise count the shots.
-  const n = Number((latest.notes || '').match(/\b(?:dose|vaccine)\s*(\d)\b/i)?.[1]) || shots.length;
-  return { status: `${ordinal(n)} dose done`, latest, next, full: false };
+  // Dose number: "Vaccine 2" / "dose 3" in the notes of the latest shot, or the number of shots, whichever is higher.
+  const n = latest ? Math.max(Number((latest.notes || '').match(/\b(?:dose|vaccine)\s*(\d)\b/i)?.[1]) || 0, shots.length) : 0;
+  const full = cat.vaccineStatus ? cat.vaccineStatus === 'Fully vaccinated'
+    : n >= FULL_DOSES || shots.some((e) => /\b(final|fully|complete[d]?|booster)\b/i.test(e.notes || ''));
+  if (!latest && !cat.vaccineStatus) return null;
+  const next = latest ? (latest.nextDue || (full ? addYear(latest.date) : '')) : '';
+  const status = cat.vaccineStatus || (full ? 'Fully vaccinated' : `${ordinal(n)} dose done`);
+  return { status, latest, next, full, nextLabel: full ? 'Yearly booster' : 'Next dose' };
 }
 
 // Latest deworm / deflea, counting "Deworm + flea" for both.
@@ -837,12 +849,12 @@ function healthFacts(cat) {
   const worm = lastTreatment(cat, 'deworm');
   const flea = lastTreatment(cat, 'deflea');
   const none = '<span class="muted">Not recorded</span>';
-  const next = (d) => (!d ? '' : daysUntil(d) <= 14 ? `<div class="meta">next ${fmtShort(d)} ${dueBadge(d)}</div>` : `<div class="meta">next ${fmtDate(d)}</div>`);
+  const next = (d, label = 'next') => (!d ? '' : daysUntil(d) <= 14 ? `<div class="meta">${label} ${fmtShort(d)} ${dueBadge(d)}</div>` : `<div class="meta">${label} ${fmtDate(d)}</div>`);
   const rows = [
     ['FIV/FeLV', fiv ? `<span class="badge ${fiv.result === 'Negative' ? 'ok' : 'danger'}">${esc(fiv.result)}</span>
       ${fiv.date ? `<div class="meta">Tested ${fmtDate(fiv.date)}</div>` : ''}` : none],
     ['Vaccination', vac ? `<span class="badge ${vac.full ? 'ok' : 'warn'}">${esc(vac.status)}</span>
-      ${vac.latest ? `<div class="meta">Last ${fmtDate(vac.latest.date)}</div>` : ''}${next(vac.next)}` : '<span class="badge">Not vaccinated yet</span>'],
+      ${vac.latest ? `<div class="meta">Last ${fmtDate(vac.latest.date)}</div>` : ''}${next(vac.next, vac.full ? 'Yearly booster' : 'Next dose')}` : '<span class="badge">Not vaccinated yet</span>'],
     ['Last deworm', worm ? `${fmtDate(worm.date)}${next(worm.nextDue)}` : none],
     ['Last deflea', flea ? `${fmtDate(flea.date)}${next(flea.nextDue)}` : none],
   ];
@@ -889,8 +901,8 @@ function renderCats() {
   const catById = Object.fromEntries(cats.map((c) => [c.id, c]));
   const remindersHtml = reminders.length ? `<div class="card">
       <div class="section-head"><h2>⏰ Coming up</h2></div>
-      ${reminders.filter((r) => catById[r.e.catId]).slice(0, S.showAllReminders ? undefined : 5).map(({ e, due, planned }) => `<div class="reminder">${avatar(catById[e.catId])}
-        <div class="grow"><div><strong>${esc(catById[e.catId].name)}</strong> · ${esc(e.type)}</div>
+      ${reminders.filter((r) => catById[r.e.catId]).slice(0, S.showAllReminders ? undefined : 5).map(({ e, due, planned, label }) => `<div class="reminder">${avatar(catById[e.catId])}
+        <div class="grow"><div><strong>${esc(catById[e.catId].name)}</strong> · ${esc(label || e.type)}</div>
         <div class="meta muted small">${planned ? 'Planned' : `Last ${fmtShort(e.date)}`}${e.notes ? ' · ' + esc(shorten(e.notes)) : ''}</div></div>
         ${dueBadge(due)}</div>`).join('')}
       ${reminders.length > 5 ? `<button class="btn ghost" data-action="toggleReminders">${S.showAllReminders ? 'Show less' : `Show all ${reminders.length}`}</button>` : ''}
@@ -1021,7 +1033,7 @@ function renderCatsOverview() {
         <span class="muted" aria-hidden="true">›</span></div>
       <dl>
         <div><dt>Weight</dt><dd>${lastW ? `${fmtKg(lastW.kg)} ${prevW ? diffBadge(kgDiff(lastW.kg, prevW.kg)) : ''}<span class="meta"> · ${fmtShort(lastW.date)}</span>` : '<span class="muted">—</span>'}</dd></div>
-        <div><dt>Next up</dt><dd>${due ? `${esc(due.e.type)} ${dueBadge(due.due)}` : '<span class="muted">Nothing scheduled</span>'}</dd></div>
+        <div><dt>Next up</dt><dd>${due ? `${esc(due.label || due.e.type)} ${dueBadge(due.due)}` : '<span class="muted">Nothing scheduled</span>'}</dd></div>
         <div><dt>Meals</dt><dd>${meals.length ? meals.map((m) => esc(m.time)).join(', ') : '<span class="muted">—</span>'}</dd></div>
       </dl>
       <div class="small">${byline(latest)}</div>
@@ -1053,7 +1065,7 @@ function catForm(cat) {
       { name: 'fivFelvDate', label: 'FIV/FeLV test date', type: 'date', value: (cat && fivFelvOf(cat)?.date) || '' },
       { name: 'vaccineStatus', label: 'Vaccination status', type: 'select', value: cat?.vaccineStatus || '',
         options: [{ value: '', label: 'Automatic (from Important dates)' },
-          ...['Not vaccinated', '1st dose done', '2nd dose done', '3rd dose done', 'Fully vaccinated'].map((r) => ({ value: r, label: r }))] },
+          ...['Not vaccinated', '1st dose done', '2nd dose done', 'Fully vaccinated'].map((r) => ({ value: r, label: r === 'Fully vaccinated' ? 'Fully vaccinated (3 doses)' : r }))] },
       { name: 'notes', label: 'Notes', type: 'textarea', value: cat?.notes, placeholder: 'Allergies, vet contact, personality…' },
     ],
     onSubmit: async (v) => {

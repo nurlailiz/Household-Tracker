@@ -21,7 +21,7 @@ The first screen: an overview of everything.
 - **Profiles** for multiple cats: photo, breed, sex, birthday (age worked out for you), colour, microchip and notes
 - **🩺 Health** on each profile:
   - **FIV/FeLV** result and test date (a profile field; edit it with **Edit**)
-  - **Vaccination** status, e.g. *1st dose done* or *Fully vaccinated*, with last and next dates. It's worked out from the Vaccination entries in Important dates: a note saying *final*, *fully*, *complete* or *booster* means fully vaccinated, otherwise the dose number in the note ("Vaccine 2", "dose 3") or the number of shots. You can also set it by hand in **Edit**.
+  - **Vaccination** status: *1st dose done*, *2nd dose done*, then *Fully vaccinated* after **3 doses**, worked out from the Vaccination entries in Important dates (the number of shots, or "dose 3" / *final* / *booster* in a note). Before that it shows the next dose date; once fully vaccinated it shows the **yearly booster**, a year after the last shot unless you entered a different next-due date. The booster also appears in Coming up and on Home. You can set the status by hand in **Edit**.
   - **Last deworm** and **last deflea**, with next due dates, taken from Important dates (*Deworm + flea* counts for both).
 - **All cats overview**: one combined weight graph (one coloured line per cat) and a card for each cat with latest weight, next due date and meal times
 - **Weight log** with a graph for each cat and the change since the last weigh-in
