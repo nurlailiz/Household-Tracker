@@ -485,7 +485,7 @@ function householdHtml() {
     <ul class="list">
       ${members.map((p) => `<li>${personDot(p)}
         <div class="grow"><div class="title">${esc(p)}${p === S.me ? ' <span class="muted">(you)</span>' : ''}</div>
-        <div class="meta">${p === S.me ? 'Set your role below' : `Only ${esc(p)} can change this`}</div></div>
+        ${p !== S.me ? `<div class="meta">Only ${esc(p)} can change this</div>` : roleOf(p) ? '' : '<div class="meta">Set your role below</div>'}</div>
         ${roleOf(p) ? roleBadge(p) : '<span class="badge">No role yet</span>'}</li>`).join('')}
       ${cats.map((c) => `<li class="clickable" data-action="openCat" data-id="${c.id}">${avatar(c)}
         <div class="grow"><div class="title">${esc(c.name)}</div>
