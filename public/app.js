@@ -1,4 +1,10 @@
-'use strict';
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/13.3.0/firebase-app.js';
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/13.3.0/firebase-auth.js';
+import {
+  initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
+  collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, writeBatch,
+} from 'https://www.gstatic.com/firebasejs/13.3.0/firebase-firestore.js';
+import { firebaseConfig, USERNAME_DOMAIN } from './firebase-config.js';
 
 // ============================================================
 // Helpers
@@ -61,7 +67,22 @@ function toast(msg) {
 }
 
 // ============================================================
-// State & API
+// Firebase
+// ============================================================
+const fbApp = initializeApp(firebaseConfig);
+const auth = getAuth(fbApp);
+// The local cache keeps the app usable offline; changes sync when you're back online.
+const fdb = initializeFirestore(fbApp, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) });
+
+// Usernames are turned into Firebase email logins: "nurlaili" -> "nurlaili@<USERNAME_DOMAIN>".
+const toEmail = (u) => (u.includes('@') ? u : `${u}@${USERNAME_DOMAIN}`).trim().toLowerCase();
+const displayName = (user) => {
+  const n = (user.displayName || user.email.split('@')[0]);
+  return n.charAt(0).toUpperCase() + n.slice(1);
+};
+
+// ============================================================
+// State & data
 // ============================================================
 const S = {
   me: null,
@@ -71,40 +92,127 @@ const S = {
   month: thisMonth(),
 };
 
-async function api(method, url, body) {
-  const res = await fetch(url, {
-    method,
-    headers: body !== undefined || method !== 'GET' ? { 'Content-Type': 'application/json' } : {},
-    body: body !== undefined ? JSON.stringify(body) : method !== 'GET' ? '{}' : undefined,
-    credentials: 'same-origin',
+// Field types per collection: used to clean form values before saving.
+const SCHEMA = {
+  cats: { name: 'str!', breed: 'str', sex: 'str', birthday: 'str', color: 'str', microchip: 'str', notes: 'str', photo: 'str' },
+  weights: { catId: 'str!', date: 'str!', kg: 'num!', notes: 'str' },
+  feedings: { catId: 'str!', time: 'str!', food: 'str', amount: 'str', notes: 'str' },
+  events: { catId: 'str!', type: 'str!', date: 'str!', nextDue: 'str', notes: 'str' },
+  transactions: { type: 'str!', amount: 'num!', month: 'str!', date: 'str', category: 'str', description: 'str' },
+  groceries: { name: 'str!', quantity: 'str', note: 'str', addedDate: 'str!', bought: 'bool', boughtDate: 'str' },
+};
+const COLLECTIONS = Object.keys(SCHEMA);
+const CAT_CHILDREN = ['weights', 'feedings', 'events'];
+
+function clean(col, input, partial) {
+  const out = {};
+  for (const [field, spec] of Object.entries(SCHEMA[col])) {
+    const type = spec.replace('!', ''), required = spec.endsWith('!');
+    let v = input[field];
+    if (v === undefined) {
+      if (required && !partial) throw new Error(`${field} is required`);
+      continue;
+    }
+    if (type === 'num') {
+      v = Number(v);
+      if (!Number.isFinite(v)) throw new Error(`${field} must be a number`);
+    } else if (type === 'bool') {
+      v = v === true || v === 'true' || v === 'on';
+    } else {
+      v = String(v ?? '').trim();
+      if (field !== 'photo') v = v.slice(0, 2000);
+    }
+    if (required && v === '') throw new Error(`${field} is required`);
+    out[field] = v;
+  }
+  return out;
+}
+
+// Writes apply locally right away (and show up on screen via the listeners);
+// Firestore sends them to the server in the background, even after being offline.
+function background(promise) {
+  promise.catch((e) => {
+    console.error(e);
+    toast(e.code === 'permission-denied' ? 'Not allowed — this account has no access.' : 'Could not save: ' + e.message);
   });
-  const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && !url.endsWith('/login')) { S.me = null; renderLogin(); throw new Error('Please log in'); }
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-  return data;
 }
 
-async function load() {
-  const { db } = await api('GET', '/api/data');
-  S.db = db;
-  render();
+function save(col, id, data, msg) {
+  const now = new Date().toISOString();
+  let result;
+  if (id) {
+    result = { id, ...clean(col, data, true), updatedBy: S.me, updatedAt: now };
+    const { id: _, ...fields } = result;
+    background(updateDoc(doc(fdb, col, id), fields));
+  } else {
+    const ref = doc(collection(fdb, col));
+    const fields = { ...clean(col, data, false), createdBy: S.me, createdAt: now, updatedAt: now };
+    background(setDoc(ref, fields));
+    result = { id: ref.id, ...fields };
+  }
+  if (msg) toast(msg);
+  return result;
 }
 
-async function mutate(method, url, body, msg) {
-  await api(method, url, body);
-  await load();
+function remove(col, id, msg) {
+  if (col === 'cats') {
+    // Deleting a cat also deletes its weights, meals and dates.
+    const batch = writeBatch(fdb);
+    batch.delete(doc(fdb, 'cats', id));
+    for (const c of CAT_CHILDREN) for (const x of S.db[c].filter((x) => x.catId === id)) batch.delete(doc(fdb, c, x.id));
+    background(batch.commit());
+  } else {
+    background(deleteDoc(doc(fdb, col, id)));
+  }
   if (msg) toast(msg);
 }
 
-// Keep both phones in sync: poll for changes while the tab is visible.
-setInterval(async () => {
-  if (!S.me || document.hidden || $('#modal').open) return;
-  try {
-    const { rev } = await api('GET', '/api/rev');
-    if (rev !== S.db?.rev) await load();
-  } catch { /* offline — try again later */ }
-}, 8000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden && S.me) load().catch(() => {}); });
+function saveSettings(values, msg) {
+  background(setDoc(doc(fdb, 'settings', 'app'), values, { merge: true }));
+  if (msg) toast(msg);
+}
+
+// Live listeners: every change made on either phone streams in here.
+let unsubscribers = [];
+function startSync() {
+  stopSync();
+  S.db = { settings: { currency: '$' } };
+  // Show the app once every collection has arrived at least once; after that, re-render on each change.
+  const waiting = new Set([...COLLECTIONS, 'settings']);
+  const ready = (name) => {
+    if (!waiting.size) return scheduleRender();
+    waiting.delete(name);
+    if (!waiting.size) render();
+  };
+  const onError = (e) => {
+    console.error(e);
+    if (e.code === 'permission-denied') {
+      if (!unsubscribers.length) return; // already handled
+      stopSync();
+      signOut(auth);
+      renderLogin('This account is not allowed to use this app.');
+    } else toast('Sync problem: ' + e.message);
+  };
+  for (const c of COLLECTIONS) {
+    S.db[c] = [];
+    unsubscribers.push(onSnapshot(collection(fdb, c), (snap) => {
+      S.db[c] = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      ready(c);
+    }, onError));
+  }
+  unsubscribers.push(onSnapshot(doc(fdb, 'settings', 'app'), (snap) => {
+    S.db.settings = { currency: '$', ...(snap.data() || {}) };
+    ready('settings');
+  }, onError));
+}
+function stopSync() { unsubscribers.forEach((u) => u()); unsubscribers = []; }
+
+let renderQueued = false;
+function scheduleRender() {
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(() => { renderQueued = false; render(); });
+}
 
 // ============================================================
 // Modal form builder
@@ -220,27 +328,43 @@ function resizeImage(file, max) {
 // ============================================================
 // Login
 // ============================================================
-function renderLogin(needsPassword = true) {
+const AUTH_ERRORS = {
+  'auth/invalid-credential': 'Wrong username or password.',
+  'auth/invalid-login-credentials': 'Wrong username or password.',
+  'auth/wrong-password': 'Wrong username or password.',
+  'auth/user-not-found': 'Wrong username or password.',
+  'auth/invalid-email': 'That username isn\'t valid.',
+  'auth/user-disabled': 'This account has been disabled.',
+  'auth/too-many-requests': 'Too many attempts. Please wait a few minutes and try again.',
+  'auth/network-request-failed': 'No connection. Check your internet and try again.',
+};
+
+function renderLogin(message = '') {
   $('#modal').open && $('#modal').close();
   $('#app').innerHTML = `<div class="login">
     <img src="/icon.svg" alt="">
     <h1>Our Home</h1>
     <p class="muted">Cats, money and groceries — shared.</p>
     <form id="loginForm">
-      <label class="field"><span>Your name</span><input name="name" required autocomplete="username" value="${esc(store.get('lastName', ''))}"></label>
-      ${needsPassword ? `<label class="field"><span>Shared password</span><input name="password" type="password" required autocomplete="current-password"></label>` : ''}
-      <p class="form-error" id="loginError"></p>
+      <label class="field"><span>Username</span><input name="username" required autocomplete="username"
+        autocapitalize="none" spellcheck="false" value="${esc(store.get('lastUser', ''))}"></label>
+      <label class="field"><span>Password</span><input name="password" type="password" required autocomplete="current-password"></label>
+      <p class="form-error" id="loginError">${esc(message)}</p>
       <button class="btn primary" type="submit">Sign in</button>
     </form></div>`;
   $('#loginForm').onsubmit = async (e) => {
     e.preventDefault();
-    const v = Object.fromEntries(new FormData(e.target).entries());
+    const { username, password } = Object.fromEntries(new FormData(e.target).entries());
+    const btn = e.target.querySelector('button');
+    btn.disabled = true;
     try {
-      const { name } = await api('POST', '/api/login', v);
-      store.set('lastName', name);
-      S.me = name;
-      await load();
-    } catch (ex) { $('#loginError').textContent = ex.message; }
+      await signInWithEmailAndPassword(auth, toEmail(username), password);
+      store.set('lastUser', username.trim());
+      // onAuthStateChanged takes it from here.
+    } catch (ex) {
+      $('#loginError').textContent = AUTH_ERRORS[ex.code] || ex.message;
+      btn.disabled = false;
+    }
   };
 }
 
@@ -256,6 +380,8 @@ const TABS = [
 function render() {
   if (!S.db) return;
   const scroll = window.scrollY;
+  const active = document.activeElement?.closest('#groceryAdd') ? document.activeElement.name : null;
+  const draft = $('#groceryAdd') ? Object.fromEntries(new FormData($('#groceryAdd')).entries()) : null;
   const body = { cats: renderCats, money: renderMoney, grocery: renderGrocery }[S.tab] || renderCats;
   $('#app').innerHTML = `
     <header class="topbar">
@@ -266,6 +392,10 @@ function render() {
     <nav class="tabs">${TABS.map((t) => `<button data-tab="${t.id}" ${S.tab === t.id ? 'aria-current="page"' : ''}>
       <span class="ico" aria-hidden="true">${t.ico}</span>${t.label}</button>`).join('')}</nav>
     <main>${body()}</main>`;
+  if (draft && $('#groceryAdd')) {
+    for (const [k, v] of Object.entries(draft)) $('#groceryAdd').elements[k].value = v;
+    if (active) $('#groceryAdd').elements[active].focus();
+  }
   window.scrollTo(0, scroll);
 }
 
@@ -289,8 +419,8 @@ const ACTIONS = {};
 ACTIONS.settings = () => openForm({
   title: 'Settings',
   fields: [{ name: 'currency', label: 'Currency symbol', value: S.db.settings.currency, required: true, placeholder: 'e.g. $, RM, £, €' }],
-  onSubmit: (v) => mutate('PUT', '/api/settings', v, 'Settings saved'),
-  onDelete: async () => { await api('POST', '/api/logout'); S.me = null; S.db = null; renderLogin(); },
+  onSubmit: (v) => saveSettings({ currency: v.currency.trim().slice(0, 6) || '$' }, 'Settings saved'),
+  onDelete: () => signOut(auth),
   deleteLabel: 'Sign out',
   confirmDelete: false,
 });
@@ -439,14 +569,12 @@ function catForm(cat) {
       { name: 'notes', label: 'Notes', type: 'textarea', value: cat?.notes, placeholder: 'Allergies, vet contact, personality…' },
     ],
     onSubmit: async (v) => {
-      if (cat) return mutate('PUT', `/api/cats/${cat.id}`, v, 'Saved');
-      const created = await api('POST', '/api/cats', v);
+      if (cat) return save('cats', cat.id, v, 'Saved');
+      const created = save('cats', null, v, `${v.name.trim()} added`);
       S.catId = created.id;
       store.set('catId', created.id);
-      await load();
-      toast(`${created.name} added`);
     },
-    onDelete: cat ? () => mutate('DELETE', `/api/cats/${cat.id}`, undefined, `${cat.name} removed`) : null,
+    onDelete: cat ? () => remove('cats', cat.id, `${cat.name} removed`) : null,
     deleteLabel: cat ? `Delete ${cat.name} and all records` : 'Delete',
   });
 }
@@ -461,9 +589,9 @@ function weightForm(w) {
       { name: 'date', label: 'Date', type: 'date', required: true, value: w?.date || today() },
       { name: 'notes', label: 'Notes', value: w?.notes },
     ],
-    onSubmit: (v) => w ? mutate('PUT', `/api/weights/${w.id}`, v, 'Saved')
-      : mutate('POST', '/api/weights', { ...v, catId: S.catId }, 'Weight logged'),
-    onDelete: w ? () => mutate('DELETE', `/api/weights/${w.id}`, undefined, 'Deleted') : null,
+    onSubmit: (v) => w ? save('weights', w.id, v, 'Saved')
+      : save('weights', null, { ...v, catId: S.catId }, 'Weight logged'),
+    onDelete: w ? () => remove('weights', w.id, 'Deleted') : null,
   });
 }
 ACTIONS.addWeight = () => weightForm(null);
@@ -479,9 +607,9 @@ function feedingForm(f) {
       { name: 'amount', label: 'Amount', value: f?.amount, placeholder: 'e.g. 1 pouch, 40 g' },
       { name: 'notes', label: 'Notes', value: f?.notes },
     ],
-    onSubmit: (v) => f ? mutate('PUT', `/api/feedings/${f.id}`, v, 'Saved')
-      : mutate('POST', '/api/feedings', { ...v, catId: S.catId }, 'Meal added'),
-    onDelete: f ? () => mutate('DELETE', `/api/feedings/${f.id}`, undefined, 'Deleted') : null,
+    onSubmit: (v) => f ? save('feedings', f.id, v, 'Saved')
+      : save('feedings', null, { ...v, catId: S.catId }, 'Meal added'),
+    onDelete: f ? () => remove('feedings', f.id, 'Deleted') : null,
   });
 }
 ACTIONS.addFeeding = () => feedingForm(null);
@@ -497,9 +625,9 @@ function eventForm(ev) {
       { name: 'nextDue', label: 'Next due (optional)', type: 'date', value: ev?.nextDue },
       { name: 'notes', label: 'Notes', value: ev?.notes, placeholder: 'e.g. Brand, vet clinic, batch no.' },
     ],
-    onSubmit: (v) => ev ? mutate('PUT', `/api/events/${ev.id}`, v, 'Saved')
-      : mutate('POST', '/api/events', { ...v, catId: S.catId }, 'Date added'),
-    onDelete: ev ? () => mutate('DELETE', `/api/events/${ev.id}`, undefined, 'Deleted') : null,
+    onSubmit: (v) => ev ? save('events', ev.id, v, 'Saved')
+      : save('events', null, { ...v, catId: S.catId }, 'Date added'),
+    onDelete: ev ? () => remove('events', ev.id, 'Deleted') : null,
   });
 }
 ACTIONS.addEvent = () => eventForm(null);
@@ -567,12 +695,11 @@ ACTIONS.month = (n) => { S.month = Number(n) === 0 ? thisMonth() : shiftMonth(S.
 ACTIONS.copyIncome = async () => {
   const prev = S.db.transactions.filter((t) => t.month === shiftMonth(S.month, -1) && t.type === 'income');
   for (const t of prev) {
-    await api('POST', '/api/transactions', {
+    save('transactions', null, {
       type: 'income', amount: t.amount, month: S.month, category: t.category, description: t.description,
       date: S.month === thisMonth() ? today() : S.month + '-01',
     });
   }
-  await load();
   toast(`Copied ${prev.length} income item${prev.length === 1 ? '' : 's'}`);
 };
 
@@ -592,9 +719,9 @@ function txForm(t, type) {
     onSubmit: (v) => {
       v.month = v.date ? v.date.slice(0, 7) : (t?.month || S.month);
       const msg = v.month !== S.month ? `Saved to ${fmtMonth(v.month)}` : 'Saved';
-      return t ? mutate('PUT', `/api/transactions/${t.id}`, v, msg) : mutate('POST', '/api/transactions', v, msg);
+      return t ? save('transactions', t.id, v, msg) : save('transactions', null, v, msg);
     },
-    onDelete: t ? () => mutate('DELETE', `/api/transactions/${t.id}`, undefined, 'Deleted') : null,
+    onDelete: t ? () => remove('transactions', t.id, 'Deleted') : null,
   });
   // Swap category options when switching between spending and income.
   const modal = $('#modal');
@@ -650,7 +777,7 @@ document.addEventListener('submit', async (e) => {
   const existing = S.db.groceries.find((g) => !g.bought && g.name.toLowerCase() === v.name.trim().toLowerCase());
   if (existing) { toast(`${existing.name} is already on the list`); return; }
   try {
-    await mutate('POST', '/api/groceries', { ...v, addedDate: today() }, `${v.name.trim()} added`);
+    await save('groceries', null, { ...v, addedDate: today() }, `${v.name.trim()} added`);
     $('#groceryAdd input[name=name]')?.focus();
   } catch (ex) { toast(ex.message); }
 });
@@ -658,8 +785,8 @@ document.addEventListener('submit', async (e) => {
 ACTIONS.toggleGrocery = (id) => {
   const g = S.db.groceries.find((x) => x.id === id);
   return g.bought
-    ? mutate('PUT', `/api/groceries/${id}`, { bought: false, boughtDate: '', addedDate: today() }, `${g.name} back on the list`)
-    : mutate('PUT', `/api/groceries/${id}`, { bought: true, boughtDate: today() }, `${g.name} bought`);
+    ? save('groceries', id, { bought: false, boughtDate: '', addedDate: today() }, `${g.name} back on the list`)
+    : save('groceries', id, { bought: true, boughtDate: today() }, `${g.name} bought`);
 };
 
 ACTIONS.editGrocery = (id) => {
@@ -672,33 +799,32 @@ ACTIONS.editGrocery = (id) => {
       { name: 'note', label: 'Note', value: g.note, placeholder: 'e.g. brand, store' },
       { name: 'addedDate', label: 'Ran out on', type: 'date', required: true, value: g.addedDate },
     ],
-    onSubmit: (v) => mutate('PUT', `/api/groceries/${id}`, v, 'Saved'),
-    onDelete: () => mutate('DELETE', `/api/groceries/${id}`, undefined, 'Removed'),
+    onSubmit: (v) => save('groceries', id, v, 'Saved'),
+    onDelete: () => remove('groceries', id, 'Removed'),
   });
 };
 
 ACTIONS.clearBought = async () => {
   const bought = S.db.groceries.filter((g) => g.bought);
   if (!confirm(`Remove ${bought.length} bought item${bought.length === 1 ? '' : 's'}?`)) return;
-  for (const g of bought) await api('DELETE', `/api/groceries/${g.id}`);
-  await load();
+  const batch = writeBatch(fdb);
+  for (const g of bought) batch.delete(doc(fdb, 'groceries', g.id));
+  background(batch.commit());
   toast('Cleared');
 };
 
 // ============================================================
 // Boot
 // ============================================================
-(async () => {
-  try {
-    const me = await fetch('/api/me', { credentials: 'same-origin' });
-    if (me.ok) {
-      S.me = (await me.json()).name;
-      if (S.me === 'Guest') return renderLogin(false);
-      await load();
-    } else {
-      renderLogin(true);
-    }
-  } catch {
-    $('#app').innerHTML = '<div class="loading">Can\'t reach the server. Check your connection and refresh.</div>';
+onAuthStateChanged(auth, (user) => {
+  if (user) {
+    S.me = displayName(user);
+    $('#app').innerHTML = '<div class="loading">Loading…</div>';
+    startSync();
+  } else {
+    stopSync();
+    S.me = null;
+    S.db = null;
+    renderLogin();
   }
-})();
+});

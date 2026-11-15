@@ -1,13 +1,11 @@
 {
   "name": "household-tracker",
-  "version": "1.0.0",
-  "description": "Shared household app: cats' wellbeing, monthly finances and grocery list.",
-  "main": "server.js",
+  "version": "2.0.0",
+  "description": "Shared household app: cats' wellbeing, monthly finances and grocery list. Firebase-backed.",
   "private": true,
   "scripts": {
-    "start": "node server.js",
-    "test": "node --test test/*.test.js"
+    "start": "node serve.js",
+    "deploy": "npx firebase-tools deploy --only hosting,firestore:rules"
   },
-  "engines": { "node": ">=18" },
   "license": "MIT"
 }
