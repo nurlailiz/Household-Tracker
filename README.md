@@ -91,7 +91,7 @@ To try it on your own computer, run `npm start` and open http://localhost:3000. 
 
 ## Version
 
-The app's version shows at the bottom of every screen (e.g. **V1.0**). It's set in `public/version.js` and goes up by 0.1 with every change (1.0 → 1.1 → … → 1.9 → 2.0). If the number at the bottom hasn't changed after an update, you're still seeing an older copy: wait a few minutes or reload.
+The app's version shows at the bottom of every screen (e.g. **V1.0**). It's set in `public/version.js` and goes up by 0.1 with every change (1.0 → 1.1 → … → 1.9 → 2.0). If the number at the bottom hasn't changed after an update, your phone is still using a saved older copy. Go to **⚙️ Settings → 🔄 Refresh app**: it checks the latest version, downloads fresh copies of the app's files and reloads (your data isn't affected).
 
 ## Files
 

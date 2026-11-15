@@ -504,7 +504,10 @@ ACTIONS.settings = () => openForm({
       options: [{ value: '', label: 'Choose your role…' }, ...ROLES.map((r) => ({ value: r, label: r }))] },
     { name: 'currency', label: 'Currency symbol', value: S.db.settings.currency, required: true, placeholder: 'e.g. $, RM, £, €' },
   ],
-  footer: `<p style="margin:0 0 8px"><button type="button" class="btn" data-action="openImport">📥 Import cat records…</button></p>`,
+  footer: `<div class="row wrap" style="margin:0 0 8px">
+      <button type="button" class="btn" data-action="forceRefresh">🔄 Refresh app</button>
+      <button type="button" class="btn" data-action="openImport">📥 Import cat records…</button></div>
+    <p class="small muted" style="margin:0 0 8px">You're on V${APP_VERSION}. Refresh app downloads the newest version.</p>`,
   // Only your own entry in "roles" is changed; your partner's stays as they set it.
   onSubmit: (v) => saveSettings({
     currency: v.currency.trim().slice(0, 6) || '$',
@@ -1342,6 +1345,44 @@ ACTIONS.editGrocery = (id) => {
     deleteLabel: g.bought ? 'Remove (used up / thrown away)' : 'Remove',
   });
 };
+
+// ============================================================
+// Refresh app (Settings): get the newest version without waiting for the phone's cache
+// ============================================================
+const APP_FILES = ['./', './index.html', './app.js', './styles.css', './version.js', './firebase-config.js', './manifest.webmanifest', './icon.svg'];
+
+async function latestVersion() {
+  const res = await fetch(`./version.js?check=${Date.now()}`, { cache: 'no-store' });
+  if (!res.ok) throw new Error('Could not check');
+  return (await res.text()).match(/APP_VERSION\s*=\s*'([^']+)'/)?.[1] || null;
+}
+
+ACTIONS.forceRefresh = async (_, btn) => {
+  btn.disabled = true;
+  btn.textContent = 'Checking…';
+  let latest;
+  try {
+    latest = await latestVersion();
+  } catch {
+    // Offline: reloading now could leave the app unable to start, so stop here.
+    btn.disabled = false;
+    btn.textContent = '🔄 Refresh app';
+    toast("No connection. Can't refresh right now.");
+    return;
+  }
+  btn.textContent = latest && latest !== APP_VERSION ? `Updating to V${latest}…` : 'Refreshing…';
+  try { sessionStorage.setItem('refreshedFrom', APP_VERSION); } catch { /* ignore */ }
+  // Re-download every app file, replacing the copies the phone has saved, then reload.
+  await Promise.allSettled(APP_FILES.map((u) => fetch(u, { cache: 'reload' })));
+  location.reload();
+};
+
+// After a refresh, say what happened.
+(() => {
+  let from = null;
+  try { from = sessionStorage.getItem('refreshedFrom'); sessionStorage.removeItem('refreshedFrom'); } catch { /* ignore */ }
+  if (from) setTimeout(() => toast(from !== APP_VERSION ? `Updated to V${APP_VERSION} 🎉` : `You're on the latest version (V${APP_VERSION})`), 600);
+})();
 
 // ============================================================
 // Boot
