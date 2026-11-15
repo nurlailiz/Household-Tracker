@@ -135,7 +135,8 @@ const S = {
 
 // Field types per collection: used to clean form values before saving.
 const SCHEMA = {
-  cats: { name: 'str!', breed: 'str', sex: 'str', birthday: 'str', color: 'str', microchip: 'str', notes: 'str', photo: 'str' },
+  cats: { name: 'str!', breed: 'str', sex: 'str', birthday: 'str', color: 'str', microchip: 'str', notes: 'str', photo: 'str',
+    fivFelv: 'str', fivFelvDate: 'str', vaccineStatus: 'str' },
   weights: { catId: 'str!', date: 'str!', kg: 'num!', notes: 'str' },
   feedings: { catId: 'str!', time: 'str!', food: 'str', amount: 'str', notes: 'str' },
   events: { catId: 'str!', type: 'str!', date: 'str!', nextDue: 'str', notes: 'str' },
@@ -223,7 +224,7 @@ function startSync() {
   const ready = (name) => {
     if (!waiting.size) return scheduleRender();
     waiting.delete(name);
-    if (!waiting.size) render();
+    if (!waiting.size) { render(); migrateFivFelv(); }
   };
   const onError = (e) => {
     console.error(e);
@@ -795,6 +796,79 @@ function dueList() {
 }
 const upcomingReminders = () => dueList().filter((x) => daysUntil(x.due) <= 30);
 
+// ---------- Health summary (from the profile and Important dates) ----------
+const FIV_RESULTS = ['Negative', 'FIV positive', 'FeLV positive', 'FIV & FeLV positive'];
+const mentionsFiv = (e) => /FIV\s*\/?\s*FeLV/i.test(`${e.type} ${e.notes || ''}`);
+const pastEvents = (catId) => S.db.events.filter((e) => e.catId === catId && e.date <= today())
+  .sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt || '').localeCompare(a.createdAt || ''));
+
+// FIV/FeLV: the profile field, or (until it's set) the latest test found in Important dates.
+function fivFelvOf(cat) {
+  if (cat.fivFelv) return { result: cat.fivFelv, date: cat.fivFelvDate || '' };
+  const e = pastEvents(cat.id).find((x) => mentionsFiv(x) && /negative/i.test(x.notes || ''));
+  return e ? { result: 'Negative', date: e.date, derived: true } : null;
+}
+
+function ordinal(n) { return `${n}${['th', 'st', 'nd', 'rd'][(n % 100 >> 3) ^ 1 && n % 10] || 'th'}`; }
+
+// Vaccination status: set by hand in the profile, or worked out from Vaccination entries.
+function vaccinationOf(cat) {
+  const shots = pastEvents(cat.id).filter((e) => /vaccin/i.test(e.type));
+  const latest = shots[0];
+  const next = latest?.nextDue || '';
+  if (cat.vaccineStatus) return { status: cat.vaccineStatus, latest, next, full: cat.vaccineStatus === 'Fully vaccinated' };
+  if (!latest) return null;
+  const full = shots.some((e) => /\b(final|fully|complete[d]?|booster)\b/i.test(e.notes || ''));
+  if (full) return { status: 'Fully vaccinated', latest, next, full: true };
+  // Dose number: "Vaccine 2" / "dose 3" in the notes of the latest shot, otherwise count the shots.
+  const n = Number((latest.notes || '').match(/\b(?:dose|vaccine)\s*(\d)\b/i)?.[1]) || shots.length;
+  return { status: `${ordinal(n)} dose done`, latest, next, full: false };
+}
+
+// Latest deworm / deflea, counting "Deworm + flea" for both.
+function lastTreatment(cat, kind) {
+  const re = kind === 'deworm' ? /deworm/i : /flea|deflea/i;
+  return pastEvents(cat.id).find((e) => re.test(e.type)) || null;
+}
+
+function healthFacts(cat) {
+  const fiv = fivFelvOf(cat);
+  const vac = vaccinationOf(cat);
+  const worm = lastTreatment(cat, 'deworm');
+  const flea = lastTreatment(cat, 'deflea');
+  const none = '<span class="muted">Not recorded</span>';
+  const next = (d) => (!d ? '' : daysUntil(d) <= 14 ? `<div class="meta">next ${fmtShort(d)} ${dueBadge(d)}</div>` : `<div class="meta">next ${fmtDate(d)}</div>`);
+  const rows = [
+    ['FIV/FeLV', fiv ? `<span class="badge ${fiv.result === 'Negative' ? 'ok' : 'danger'}">${esc(fiv.result)}</span>
+      ${fiv.date ? `<div class="meta">Tested ${fmtDate(fiv.date)}</div>` : ''}` : none],
+    ['Vaccination', vac ? `<span class="badge ${vac.full ? 'ok' : 'warn'}">${esc(vac.status)}</span>
+      ${vac.latest ? `<div class="meta">Last ${fmtDate(vac.latest.date)}</div>` : ''}${next(vac.next)}` : '<span class="badge">Not vaccinated yet</span>'],
+    ['Last deworm', worm ? `${fmtDate(worm.date)}${next(worm.nextDue)}` : none],
+    ['Last deflea', flea ? `${fmtDate(flea.date)}${next(flea.nextDue)}` : none],
+  ];
+  return `<h3 class="facts-head">🩺 Health</h3>
+    <div class="facts health">${rows.map(([k, v]) => `<div><span>${k}</span>${v}</div>`).join('')}</div>`;
+}
+
+// One-time tidy-up: move "FIV/FeLV negative…" from a cat's notes into its FIV/FeLV field.
+let fivMigrated = false;
+function migrateFivFelv() {
+  if (fivMigrated) return;
+  fivMigrated = true;
+  const now = new Date().toISOString();
+  const batch = writeBatch(fdb);
+  let changes = 0;
+  for (const cat of S.db.cats) {
+    if (cat.fivFelv) continue;
+    const found = fivFelvOf(cat);
+    if (!found) continue;
+    const notes = (cat.notes || '').replace(/^[ \t]*FIV\s*\/\s*FeLV[^\n]*(\n|$)/gim, '').trim();
+    batch.update(doc(fdb, 'cats', cat.id), { fivFelv: found.result, fivFelvDate: found.date, notes, updatedBy: S.me, updatedAt: now });
+    changes++;
+  }
+  if (changes) background(batch.commit());
+}
+
 function renderCats() {
   const cats = S.db.cats;
   const cat = currentCat();
@@ -840,6 +914,7 @@ function renderCats() {
         <div class="muted small">${esc([cat.breed, age(cat.birthday)].filter(Boolean).join(' · ')) || 'Add details in the profile'}</div></div>
       <button class="btn" data-action="editCat" data-id="${cat.id}">Edit</button></div>
     ${facts.length ? `<div class="facts">${facts.map(([k, v]) => `<div><span>${k}</span>${esc(v)}</div>`).join('')}</div>` : ''}
+    ${healthFacts(cat)}
     ${cat.notes ? `<p class="notes">${esc(cat.notes)}</p>` : ''}
     <div class="small" style="margin-top:12px">${byline(cat)}</div>
   </div>`;
@@ -973,6 +1048,12 @@ function catForm(cat) {
       { name: 'birthday', label: 'Birthday (or estimate)', type: 'date', value: cat?.birthday },
       { name: 'color', label: 'Colour / markings', value: cat?.color },
       { name: 'microchip', label: 'Microchip no.', value: cat?.microchip },
+      { name: 'fivFelv', label: 'FIV/FeLV result', type: 'select', value: (cat && fivFelvOf(cat)?.result) || '',
+        options: [{ value: '', label: 'Not tested yet' }, ...FIV_RESULTS.map((r) => ({ value: r, label: r }))] },
+      { name: 'fivFelvDate', label: 'FIV/FeLV test date', type: 'date', value: (cat && fivFelvOf(cat)?.date) || '' },
+      { name: 'vaccineStatus', label: 'Vaccination status', type: 'select', value: cat?.vaccineStatus || '',
+        options: [{ value: '', label: 'Automatic (from Important dates)' },
+          ...['Not vaccinated', '1st dose done', '2nd dose done', '3rd dose done', 'Fully vaccinated'].map((r) => ({ value: r, label: r }))] },
       { name: 'notes', label: 'Notes', type: 'textarea', value: cat?.notes, placeholder: 'Allergies, vet contact, personality…' },
     ],
     onSubmit: async (v) => {
