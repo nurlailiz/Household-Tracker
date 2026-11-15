@@ -261,7 +261,7 @@ function scheduleRender() {
 // Modal form builder
 // ============================================================
 // fields: [{ name, label, type: text|number|date|time|month|textarea|select|segment|photo, options, required, value, step, placeholder }]
-function openForm({ title, fields, submitLabel = 'Save', onSubmit, onDelete, deleteLabel = 'Delete', confirmDelete = true, meta = '' }) {
+function openForm({ title, fields, submitLabel = 'Save', onSubmit, onDelete, deleteLabel = 'Delete', confirmDelete = true, meta = '', footer = '' }) {
   const modal = $('#modal');
   const fieldHtml = (f) => {
     const v = f.value ?? '';
@@ -295,9 +295,10 @@ function openForm({ title, fields, submitLabel = 'Save', onSubmit, onDelete, del
   };
 
   modal.innerHTML = `<form method="dialog" novalidate>
-    <h3>${esc(title)}</h3>
+    <h3 tabindex="-1" autofocus>${esc(title)}</h3>
     ${meta}
     ${fields.map(fieldHtml).join('')}
+    ${footer}
     <p class="form-error" id="formError"></p>
     <div class="modal-actions">
       ${onDelete ? `<button type="button" class="btn danger" id="formDelete">${esc(deleteLabel)}</button>` : ''}
@@ -467,11 +468,45 @@ document.addEventListener('keydown', (e) => {
 
 const ACTIONS = {};
 
+// ---------- Household roles ----------
+// Each person sets their own role (the app only lets you change yours). Cats are always "Cat".
+const ROLES = ['Wife', 'Husband', 'Partner', 'Other'];
+const roleOf = (p) => S.db?.settings?.roles?.[p] || '';
+const roleBadge = (p) => (roleOf(p) ? `<span class="badge ok">${esc(roleOf(p))}</span>` : '');
+
+function householdHtml() {
+  const members = people();
+  const cats = S.db.cats.slice().sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+  return `<section class="household">
+    <h4>👨‍👩‍🐈 Household</h4>
+    <ul class="list">
+      ${members.map((p) => `<li>${personDot(p)}
+        <div class="grow"><div class="title">${esc(p)}${p === S.me ? ' <span class="muted">(you)</span>' : ''}</div>
+        <div class="meta">${p === S.me ? 'Set your role below' : `Only ${esc(p)} can change this`}</div></div>
+        ${roleOf(p) ? roleBadge(p) : '<span class="badge">No role yet</span>'}</li>`).join('')}
+      ${cats.map((c) => `<li class="clickable" data-action="openCat" data-id="${c.id}">${avatar(c)}
+        <div class="grow"><div class="title">${esc(c.name)}</div>
+        <div class="meta">${esc([c.sex, age(c.birthday)].filter(Boolean).join(' · ') || 'Tap to open')}</div></div>
+        <span class="badge">🐱 Cat</span></li>`).join('')}
+    </ul>
+    ${members.length < 2 ? '<p class="small muted">Your partner will appear here after they sign in once.</p>' : ''}
+  </section>`;
+}
+
 ACTIONS.settings = () => openForm({
   title: 'Settings',
-  meta: `<p style="margin:-4px 0 14px"><button type="button" class="btn" data-action="openImport">📥 Import cat records…</button></p>`,
-  fields: [{ name: 'currency', label: 'Currency symbol', value: S.db.settings.currency, required: true, placeholder: 'e.g. $, RM, £, €' }],
-  onSubmit: (v) => saveSettings({ currency: v.currency.trim().slice(0, 6) || '$' }, 'Settings saved'),
+  meta: householdHtml(),
+  fields: [
+    { name: 'role', label: `Your role (${S.me})`, type: 'select', value: roleOf(S.me),
+      options: [{ value: '', label: 'Choose your role…' }, ...ROLES.map((r) => ({ value: r, label: r }))] },
+    { name: 'currency', label: 'Currency symbol', value: S.db.settings.currency, required: true, placeholder: 'e.g. $, RM, £, €' },
+  ],
+  footer: `<p style="margin:0 0 8px"><button type="button" class="btn" data-action="openImport">📥 Import cat records…</button></p>`,
+  // Only your own entry in "roles" is changed; your partner's stays as they set it.
+  onSubmit: (v) => saveSettings({
+    currency: v.currency.trim().slice(0, 6) || '$',
+    roles: { ...(S.db.settings.roles || {}), [S.me]: v.role || '' },
+  }, 'Settings saved'),
   onDelete: () => signOut(auth),
   deleteLabel: 'Sign out',
   confirmDelete: false,
@@ -642,6 +677,7 @@ function renderHome() {
 }
 
 ACTIONS.openCat = (id) => {
+  if ($('#modal').open) $('#modal').close();
   S.tab = 'cats'; store.set('tab', 'cats');
   S.catId = id; store.set('catId', id);
   render();
@@ -1097,7 +1133,7 @@ function personBalance(p, month) {
   const { inc, exp, left } = monthTotals(month, p);
   const pct = inc > 0 ? Math.min(100, (exp / inc) * 100) : (exp > 0 ? 100 : 0);
   return `<div class="balance clickable" role="button" tabindex="0" data-action="openMoney" data-id="${esc(p)}">
-    <div class="row">${personDot(p)}<strong class="grow">${esc(p === S.me ? `${p} (you)` : p)}</strong>
+    <div class="row">${personDot(p)}<strong>${esc(p === S.me ? `${p} (you)` : p)}</strong><span class="grow">${roleBadge(p)}</span>
       <span class="amount" style="color:${left < 0 ? 'var(--danger)' : 'inherit'}">${left < 0 ? 'Over ' : ''}${money(Math.abs(left))}${left < 0 ? '' : ' left'}</span></div>
     <div class="meter ${exp > inc && inc > 0 ? 'over' : ''}"><div style="width:${pct}%"></div></div>
     <div class="meta">Income ${money(inc)} · Spent ${money(exp)}</div>

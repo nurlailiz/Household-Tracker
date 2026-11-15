@@ -12,6 +12,11 @@ The first screen: an overview of everything.
 
 **Who changed what:** every cat record, weight, meal, date, income, spending and grocery item shows who added it or last updated it, and when (for example *Updated by Husband · 5m ago*). Edit forms show the full history. The 🕘 button lists recent activity from both of you across all modules.
 
+### ⚙️ Settings · Household
+- **👨‍👩‍🐈 Household** lists everyone in the home: the two of you, each with a role, and every cat (🐱 Cat). Tap a cat to open it.
+- Each of you sets **your own role** (Wife, Husband, Partner or Other); the app doesn't let you change the other person's. Roles also show next to your names on Home and in Money.
+- Each person appears after they've signed in once.
+
 ### 🐱 Cats
 - **Profiles** for multiple cats: photo, breed, sex, birthday (age worked out for you), colour, microchip and notes
 - **All cats overview**: one combined weight graph (one coloured line per cat) and a card for each cat with latest weight, next due date and meal times

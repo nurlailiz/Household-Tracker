@@ -305,3 +305,12 @@ dialog h3 { margin: 0 0 16px; font-size: 1.15rem; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .money-tabs button[aria-selected="true"] { background: var(--surface); box-shadow: var(--shadow); font-weight: 600; }
+
+/* ---------- Settings: Household ---------- */
+.household { margin: -4px 0 14px; padding: 4px 12px 8px; background: var(--surface-2); border-radius: 12px; }
+.household h4 { margin: 8px 0 2px; font-size: .95rem; }
+.household .list > li { padding: 9px 2px; }
+.household .person { width: 32px; height: 32px; font-size: .95rem; }
+.household p { margin: 4px 0 0; }
+.balance .badge { margin-left: 6px; }
+dialog h3:focus { outline: none; }
