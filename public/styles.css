@@ -39,6 +39,9 @@
 }
 
 * { box-sizing: border-box; }
+/* No double-tap-to-zoom (taps respond instantly); pinch-to-zoom still works.
+   Set on every element because nested scroll areas (dialogs, chip rows) don't inherit it from <html>. */
+html, body, * { touch-action: manipulation; }
 html, body { margin: 0; }
 body {
   background: var(--bg);
