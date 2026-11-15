@@ -273,3 +273,14 @@ dialog h3 { margin: 0 0 16px; font-size: 1.15rem; }
 .cat-card dl > div { display: grid; grid-template-columns: 70px 1fr; gap: 8px; align-items: baseline; }
 .cat-card dt { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
 .cat-card dd { margin: 0; font-size: .92rem; }
+
+/* ---------- Grocery: expiry ---------- */
+.card.alert { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); background: color-mix(in srgb, var(--danger-soft) 55%, var(--surface)); }
+.tabs button { position: relative; }
+.tab-badge {
+  position: absolute; top: 4px; left: calc(50% + 6px);
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
+  background: var(--danger); color: #fff; font-size: .7rem; font-weight: 700; line-height: 18px; text-align: center;
+}
+@media (min-width: 800px) { .tab-badge { position: static; order: 3; } }
+.btn.small { padding: 4px 10px; font-size: .8rem; }

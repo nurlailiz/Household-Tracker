@@ -136,7 +136,7 @@ const SCHEMA = {
   feedings: { catId: 'str!', time: 'str!', food: 'str', amount: 'str', notes: 'str' },
   events: { catId: 'str!', type: 'str!', date: 'str!', nextDue: 'str', notes: 'str' },
   transactions: { type: 'str!', amount: 'num!', month: 'str!', date: 'str', category: 'str', description: 'str' },
-  groceries: { name: 'str!', quantity: 'str', note: 'str', addedDate: 'str!', bought: 'bool', boughtDate: 'str' },
+  groceries: { name: 'str!', quantity: 'str', note: 'str', addedDate: 'str!', bought: 'bool', boughtDate: 'str', boughtBy: 'str', expiry: 'str' },
 };
 const COLLECTIONS = Object.keys(SCHEMA);
 const CAT_CHILDREN = ['weights', 'feedings', 'events'];
@@ -432,6 +432,7 @@ function render() {
       <button class="btn icon ghost" data-action="settings" title="Settings" aria-label="Settings">⚙️</button>
     </header>
     <nav class="tabs">${TABS.map((t) => `<button data-tab="${t.id}" ${S.tab === t.id ? 'aria-current="page"' : ''}>
+      ${t.id === 'grocery' && expiringSoon().length ? `<span class="tab-badge" aria-label="${expiringSoon().length} expiring soon">${expiringSoon().length}</span>` : ''}
       <span class="ico" aria-hidden="true">${t.ico}</span>${t.label}</button>`).join('')}</nav>
     <main>${body()}</main>`;
   if (draft && $('#groceryAdd')) {
@@ -1047,20 +1048,60 @@ ACTIONS.editTx = (id) => txForm(S.db.transactions.find((x) => x.id === id));
 // ============================================================
 // Grocery
 // ============================================================
+// In-stock items that expire tomorrow, today, or already have.
+const expiringSoon = () => (S.db?.groceries || [])
+  .filter((g) => g.bought && g.expiry && daysUntil(g.expiry) <= 1)
+  .sort((a, b) => a.expiry.localeCompare(b.expiry));
+
+function expiryBadge(date) {
+  const d = daysUntil(date);
+  if (d < 0) return `<span class="badge danger">Expired ${fmtShort(date)}</span>`;
+  if (d === 0) return `<span class="badge danger">Expires today</span>`;
+  if (d === 1) return `<span class="badge warn">Expires tomorrow</span>`;
+  if (d <= 7) return `<span class="badge">Expires in ${d} days</span>`;
+  return `<span class="badge">Exp ${fmtShort(date)}</span>`;
+}
+
 function renderGrocery() {
   const items = S.db.groceries;
-  const needed = items.filter((g) => !g.bought).sort((a, b) => b.addedDate.localeCompare(a.addedDate) || b.createdAt.localeCompare(a.createdAt));
-  const bought = items.filter((g) => g.bought).sort((a, b) => (b.boughtDate || '').localeCompare(a.boughtDate || ''));
+  const needed = items.filter((g) => !g.bought)
+    .sort((a, b) => b.addedDate.localeCompare(a.addedDate) || (b.createdAt || '').localeCompare(a.createdAt || ''));
+  // In stock: soonest expiry first, then items without an expiry date (newest purchase first).
+  const inStock = items.filter((g) => g.bought).sort((a, b) =>
+    (a.expiry ? 0 : 1) - (b.expiry ? 0 : 1) || (a.expiry || '').localeCompare(b.expiry || '')
+    || (b.boughtDate || '').localeCompare(a.boughtDate || ''));
+  const expiring = expiringSoon();
+  const qty = (g) => (g.quantity ? ` <span class="muted">· ${esc(g.quantity)}</span>` : '');
 
-  const item = (g) => `<li class="${g.bought ? 'bought' : ''}">
-    <button class="check ${g.bought ? 'on' : ''}" data-action="toggleGrocery" data-id="${g.id}" aria-label="${g.bought ? 'Mark as needed' : 'Mark as bought'}">✓</button>
+  const neededItem = (g) => `<li>
+    <button class="check" data-action="toggleGrocery" data-id="${g.id}" aria-label="Mark ${esc(g.name)} as bought">✓</button>
     <div class="grow clickable" data-action="editGrocery" data-id="${g.id}" style="cursor:pointer">
-      <div class="title">${esc(g.name)}${g.quantity ? ` <span class="muted">· ${esc(g.quantity)}</span>` : ''}</div>
-      <div class="meta">${g.bought ? `Bought ${fmtDate(g.boughtDate)}` : `Out since ${fmtDate(g.addedDate)}`}${g.note ? ' · ' + esc(g.note) : ''}</div>
-      <div class="meta">${g.bought ? byline(g, 'Bought') : byline(g)}</div>
+      <div class="title">${esc(g.name)}${qty(g)}</div>
+      <div class="meta">Out since ${fmtDate(g.addedDate)}${g.note ? ' · ' + esc(g.note) : ''}</div>
+      <div class="meta">${byline(g)}</div>
     </div></li>`;
 
+  const stockItem = (g) => {
+    const buyer = g.boughtBy || g.updatedBy || g.createdBy;
+    return `<li>
+    <button class="check on" data-action="toggleGrocery" data-id="${g.id}" aria-label="${esc(g.name)} ran out: put back on the shopping list" title="Ran out? Put back on the list">✓</button>
+    <div class="grow clickable" data-action="editGrocery" data-id="${g.id}" style="cursor:pointer">
+      <div class="title">${esc(g.name)}${qty(g)}</div>
+      <div class="meta">Bought ${fmtDate(g.boughtDate)}${g.note ? ' · ' + esc(g.note) : ''}</div>
+      ${buyer ? `<div class="meta"><span class="by">${personDot(buyer)}Bought by ${esc(buyer)}</span></div>` : ''}
+    </div>
+    ${g.expiry ? expiryBadge(g.expiry) : `<button class="btn ghost small" data-action="addExpiry" data-id="${g.id}">＋ Expiry</button>`}
+    </li>`;
+  };
+
   return `
+    ${expiring.length ? `<div class="card alert">
+      <div class="section-head"><h2>⚠️ Expiring soon<small>${expiring.length}</small></h2></div>
+      <ul class="list">${expiring.map((g) => `<li class="clickable" data-action="editGrocery" data-id="${g.id}">
+        <div class="grow"><div class="title">${esc(g.name)}${qty(g)}</div>
+        <div class="meta">Expiry ${fmtDate(g.expiry)}</div></div>${expiryBadge(g.expiry)}</li>`).join('')}</ul>
+      <p class="small muted" style="margin:8px 0 0">Tap an item to change it, or remove it once it's used up or thrown away.</p>
+    </div>` : ''}
     <div class="card">
       <form class="quick-add" id="groceryAdd">
         <input name="name" placeholder="What ran out? e.g. Milk" required autocomplete="off" list="groceryHistory">
@@ -1068,16 +1109,19 @@ function renderGrocery() {
         <button class="btn primary" type="submit">Add</button>
         <datalist id="groceryHistory">${[...new Set(items.map((g) => g.name))].map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
       </form>
-      <p class="small muted" style="margin:8px 0 0">Today's date (${fmtDate(today())}) is saved automatically. Tap an item to edit it.</p>
+      <p class="small muted" style="margin:8px 0 0">Today's date (${fmtDate(today())}) is saved automatically. Tick an item when it's bought.</p>
     </div>
     <div class="card">
       <div class="section-head"><h2>🛒 Out of stock<small>${needed.length}</small></h2></div>
-      ${needed.length ? `<ul class="list">${needed.map(item).join('')}</ul>` : '<p class="empty">Nothing needed — the pantry is stocked! 🎉</p>'}
+      ${needed.length ? `<ul class="list">${needed.map(neededItem).join('')}</ul>` : '<p class="empty">Nothing needed. The pantry is stocked! 🎉</p>'}
     </div>
-    ${bought.length ? `<div class="card">
-      <div class="section-head"><h2>Bought<small>${bought.length}</small></h2>
-        <button class="btn danger" data-action="clearBought">Clear all</button></div>
-      <ul class="list">${bought.slice(0, 30).map(item).join('')}</ul></div>` : ''}`;
+    <div class="card">
+      <div class="section-head"><h2>🏠 In stock<small>${inStock.length}</small></h2>
+        <button class="btn primary" data-action="addStock">＋ Add</button></div>
+      ${inStock.length ? `<ul class="list">${inStock.map(stockItem).join('')}</ul>
+        <p class="small muted" style="margin:8px 0 0">Ran out? Tap the tick to put it back on the shopping list.</p>`
+        : '<p class="empty">Items you tick as bought land here. Add an expiry date and you\'ll be warned the day before.</p>'}
+    </div>`;
 }
 
 document.addEventListener('submit', async (e) => {
@@ -1096,9 +1140,30 @@ document.addEventListener('submit', async (e) => {
 ACTIONS.toggleGrocery = (id) => {
   const g = S.db.groceries.find((x) => x.id === id);
   return g.bought
-    ? save('groceries', id, { bought: false, boughtDate: '', addedDate: today() }, `${g.name} back on the list`)
-    : save('groceries', id, { bought: true, boughtDate: today() }, `${g.name} bought`);
+    ? save('groceries', id, { bought: false, boughtDate: '', boughtBy: '', expiry: '', addedDate: today() }, `${g.name} back on the shopping list`)
+    : save('groceries', id, { bought: true, boughtDate: today(), boughtBy: S.me }, `${g.name} moved to In stock`);
 };
+
+ACTIONS.addExpiry = (id) => {
+  const g = S.db.groceries.find((x) => x.id === id);
+  openForm({
+    title: `Expiry date: ${g.name}`,
+    fields: [{ name: 'expiry', label: 'Expires on', type: 'date', required: true, value: g.expiry || '' }],
+    onSubmit: (v) => save('groceries', id, v, 'Expiry date saved'),
+  });
+};
+
+ACTIONS.addStock = () => openForm({
+  title: 'Add to In stock',
+  fields: [
+    { name: 'name', label: 'Item', required: true, suggestions: [...new Set(S.db.groceries.map((g) => g.name))] },
+    { name: 'quantity', label: 'Quantity' },
+    { name: 'boughtDate', label: 'Bought on', type: 'date', required: true, value: today() },
+    { name: 'expiry', label: 'Expiry date (optional)', type: 'date' },
+    { name: 'note', label: 'Note', placeholder: 'e.g. brand, where it is kept' },
+  ],
+  onSubmit: (v) => save('groceries', null, { ...v, bought: true, boughtBy: S.me, addedDate: v.boughtDate || today() }, `${v.name.trim()} added to In stock`),
+});
 
 ACTIONS.editGrocery = (id) => {
   const g = S.db.groceries.find((x) => x.id === id);
@@ -1109,20 +1174,17 @@ ACTIONS.editGrocery = (id) => {
       { name: 'name', label: 'Item', required: true, value: g.name },
       { name: 'quantity', label: 'Quantity', value: g.quantity },
       { name: 'note', label: 'Note', value: g.note, placeholder: 'e.g. brand, store' },
-      { name: 'addedDate', label: 'Ran out on', type: 'date', required: true, value: g.addedDate },
+      ...(g.bought ? [
+        { name: 'boughtDate', label: 'Bought on', type: 'date', required: true, value: g.boughtDate },
+        { name: 'expiry', label: 'Expiry date (optional)', type: 'date', value: g.expiry },
+      ] : [
+        { name: 'addedDate', label: 'Ran out on', type: 'date', required: true, value: g.addedDate },
+      ]),
     ],
     onSubmit: (v) => save('groceries', id, v, 'Saved'),
     onDelete: () => remove('groceries', id, 'Removed'),
+    deleteLabel: g.bought ? 'Remove (used up / thrown away)' : 'Remove',
   });
-};
-
-ACTIONS.clearBought = async () => {
-  const bought = S.db.groceries.filter((g) => g.bought);
-  if (!confirm(`Remove ${bought.length} bought item${bought.length === 1 ? '' : 's'}?`)) return;
-  const batch = writeBatch(fdb);
-  for (const g of bought) batch.delete(doc(fdb, 'groceries', g.id));
-  background(batch.commit());
-  toast('Cleared');
 };
 
 // ============================================================

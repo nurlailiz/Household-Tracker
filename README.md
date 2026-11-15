@@ -22,7 +22,9 @@ A shared web app for two people, built on **Firebase**. You each sign in with a 
 
 ### 🛒 Grocery
 - Type what ran out and tap **Add**. Today's date is saved automatically.
-- Tick an item when it's bought; untick it to put it back. **Clear all** empties the bought list.
+- Tick an item when it's bought and it moves to **🏠 In stock**, showing who bought it. You can also add items straight to In stock with **＋ Add**.
+- Give an in-stock item an optional **expiry date** with **＋ Expiry**, or by tapping the item. From the day before it expires, it shows in **⚠️ Expiring soon** at the top of the Grocery tab, and a red count appears on the Grocery tab button.
+- Ran out? Tap the tick on an in-stock item to put it back on the shopping list. To remove something used up or thrown away, tap it and choose **Remove**.
 
 ---
 
