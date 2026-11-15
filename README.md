@@ -89,9 +89,14 @@ The app lives at **https://nurlailiz.github.io/Household-Tracker/**. Open it on 
 
 To try it on your own computer, run `npm start` and open http://localhost:3000. It uses the same live database.
 
+## Version
+
+The app's version shows at the bottom of every screen (e.g. **V1.0**). It's set in `public/version.js` and goes up by 0.1 with every change (1.0 → 1.1 → … → 1.9 → 2.0). If the number at the bottom hasn't changed after an update, you're still seeing an older copy: wait a few minutes or reload.
+
 ## Files
 
 - `public/`: the app (plain HTML/CSS/JS, no build step)
+  - `version.js`: the version number shown at the bottom of the app
   - `firebase-config.js`: your Firebase project config. These values are public by design; security comes from steps 3 and 5.
   - `app.js`: the screens plus Firestore sync and sign-in
 - `firestore.rules`: who may read and write data

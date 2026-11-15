@@ -1,6 +1,5 @@
 {
   "name": "household-tracker",
-  "version": "2.0.0",
   "description": "Shared household app: cats' wellbeing, monthly finances and grocery list. Firebase-backed.",
   "private": true,
   "scripts": {

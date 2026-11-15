@@ -5,6 +5,9 @@ import {
   collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, writeBatch,
 } from 'https://www.gstatic.com/firebasejs/13.3.0/firebase-firestore.js';
 import { firebaseConfig, USERNAME_DOMAIN } from './firebase-config.js';
+import { APP_VERSION } from './version.js';
+
+const versionTag = `<footer class="app-version">Our Home · V${APP_VERSION}</footer>`;
 
 // ============================================================
 // Helpers
@@ -396,7 +399,7 @@ function renderLogin(message = '') {
       <label class="field"><span>Password</span><input name="password" type="password" required autocomplete="current-password"></label>
       <p class="form-error" id="loginError">${esc(message)}</p>
       <button class="btn primary" type="submit">Sign in</button>
-    </form></div>`;
+    </form>${versionTag}</div>`;
   $('#loginForm').onsubmit = async (e) => {
     e.preventDefault();
     const { username, password } = Object.fromEntries(new FormData(e.target).entries());
@@ -439,7 +442,7 @@ function render() {
     <nav class="tabs">${TABS.map((t) => `<button data-tab="${t.id}" ${S.tab === t.id ? 'aria-current="page"' : ''}>
       ${t.id === 'grocery' && expiringSoon().length ? `<span class="tab-badge" aria-label="${expiringSoon().length} expiring soon">${expiringSoon().length}</span>` : ''}
       <span class="ico" aria-hidden="true">${t.ico}</span>${t.label}</button>`).join('')}</nav>
-    <main>${body()}</main>`;
+    <main>${body()}${versionTag}</main>`;
   if (draft && $('#groceryAdd')) {
     for (const [k, v] of Object.entries(draft)) $('#groceryAdd').elements[k].value = v;
     if (active) $('#groceryAdd').elements[active].focus();

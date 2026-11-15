@@ -314,3 +314,6 @@ dialog h3 { margin: 0 0 16px; font-size: 1.15rem; }
 .household p { margin: 4px 0 0; }
 .balance .badge { margin-left: 6px; }
 dialog h3:focus { outline: none; }
+
+/* ---------- Version ---------- */
+.app-version { text-align: center; color: var(--muted); font-size: .75rem; padding: 18px 0 4px; opacity: .8; }
