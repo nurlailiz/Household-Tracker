@@ -46,8 +46,7 @@ function age(birthday) {
 const CAT_COLORS = ['#e08a5c', '#6b8fd6', '#9b7bd1', '#4fa58a', '#d16b8f', '#c9a13b', '#5f9fb8'];
 function avatar(cat, cls = '') {
   if (cat.photo) return `<img class="avatar ${cls}" src="${esc(cat.photo)}" alt="">`;
-  let h = 0; for (const c of cat.id) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return `<span class="avatar ${cls}" style="background:${CAT_COLORS[h % CAT_COLORS.length]}">${esc(cat.name[0]?.toUpperCase() || '?')}</span>`;
+  return `<span class="avatar ${cls}" style="background:${catColor(cat)}">${esc(cat.name[0]?.toUpperCase() || '?')}</span>`;
 }
 
 function dueBadge(dateStr) {
@@ -56,6 +55,44 @@ function dueBadge(dateStr) {
   if (d === 0) return `<span class="badge danger">Due today</span>`;
   if (d <= 14) return `<span class="badge warn">In ${d} day${d === 1 ? '' : 's'}</span>`;
   return `<span class="badge">${fmtDate(dateStr)}</span>`;
+}
+
+// ---------- Who changed what ----------
+function ago(iso) {
+  if (!iso) return '';
+  const secs = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (secs < 60) return 'just now';
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+  if (secs < 172800) return 'yesterday';
+  if (secs < 604800) return `${Math.floor(secs / 86400)} days ago`;
+  return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function personColor(name) {
+  let h = 7; for (const c of String(name)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return CAT_COLORS[(h + 3) % CAT_COLORS.length];
+}
+const personDot = (name) => `<i class="person" style="background:${personColor(name)}" aria-hidden="true">${esc(String(name)[0]?.toUpperCase() || '?')}</i>`;
+
+const wasEdited = (item) => item.updatedBy && item.updatedAt && item.updatedAt !== item.createdAt;
+
+// Short "Added by X · 2h ago" / "Updated by Y · 5m ago" line for list items.
+function byline(item, verb) {
+  if (!item) return '';
+  const edited = wasEdited(item);
+  const who = edited ? item.updatedBy : item.createdBy;
+  if (!who) return '';
+  const action = verb || (edited ? 'Updated' : 'Added');
+  return `<span class="by">${personDot(who)}${action} by ${esc(who)} · ${ago(edited ? item.updatedAt : item.createdAt)}</span>`;
+}
+
+// Fuller history shown at the top of edit forms.
+function history(item) {
+  if (!item?.createdBy) return '';
+  let h = `<span class="by">${personDot(item.createdBy)}Added by ${esc(item.createdBy)} · ${ago(item.createdAt)}</span>`;
+  if (wasEdited(item)) h += `<span class="by">${personDot(item.updatedBy)}Last updated by ${esc(item.updatedBy)} · ${ago(item.updatedAt)}</span>`;
+  return `<div class="history">${h}</div>`;
 }
 
 function toast(msg) {
@@ -207,6 +244,9 @@ function startSync() {
 }
 function stopSync() { unsubscribers.forEach((u) => u()); unsubscribers = []; }
 
+// Keep "5m ago" labels fresh.
+setInterval(() => { if (S.db && !document.hidden && !$('#modal').open) scheduleRender(); }, 60000);
+
 let renderQueued = false;
 function scheduleRender() {
   if (renderQueued) return;
@@ -218,7 +258,7 @@ function scheduleRender() {
 // Modal form builder
 // ============================================================
 // fields: [{ name, label, type: text|number|date|time|month|textarea|select|segment|photo, options, required, value, step, placeholder }]
-function openForm({ title, fields, submitLabel = 'Save', onSubmit, onDelete, deleteLabel = 'Delete', confirmDelete = true }) {
+function openForm({ title, fields, submitLabel = 'Save', onSubmit, onDelete, deleteLabel = 'Delete', confirmDelete = true, meta = '' }) {
   const modal = $('#modal');
   const fieldHtml = (f) => {
     const v = f.value ?? '';
@@ -253,6 +293,7 @@ function openForm({ title, fields, submitLabel = 'Save', onSubmit, onDelete, del
 
   modal.innerHTML = `<form method="dialog" novalidate>
     <h3>${esc(title)}</h3>
+    ${meta}
     ${fields.map(fieldHtml).join('')}
     <p class="form-error" id="formError"></p>
     <div class="modal-actions">
@@ -386,7 +427,8 @@ function render() {
   $('#app').innerHTML = `
     <header class="topbar">
       <h1><img src="./icon.svg" alt="">Our Home</h1>
-      <span class="who">Hi, ${esc(S.me)}</span>
+      <span class="who">${personDot(S.me)}${esc(S.me)}</span>
+      <button class="btn icon ghost" data-action="activity" title="Recent activity" aria-label="Recent activity">🕘</button>
       <button class="btn icon ghost" data-action="settings" title="Settings" aria-label="Settings">⚙️</button>
     </header>
     <nav class="tabs">${TABS.map((t) => `<button data-tab="${t.id}" ${S.tab === t.id ? 'aria-current="page"' : ''}>
@@ -414,6 +456,10 @@ document.addEventListener('click', (e) => {
   Promise.resolve(ACTIONS[el.dataset.action](el.dataset.id, el)).catch((ex) => toast(ex.message));
 });
 
+document.addEventListener('keydown', (e) => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role=button][data-action]')) { e.preventDefault(); e.target.click(); }
+});
+
 const ACTIONS = {};
 
 ACTIONS.settings = () => openForm({
@@ -426,6 +472,53 @@ ACTIONS.settings = () => openForm({
 });
 
 // ============================================================
+// Recent activity (both of you, all modules)
+// ============================================================
+const MODULE_ICONS = { cats: '🐱', weights: '⚖️', feedings: '🍽️', events: '📅', transactions: '💰', groceries: '🛒' };
+
+function describe(col, x) {
+  const catName = (id) => S.db.cats.find((c) => c.id === id)?.name || 'a cat';
+  switch (col) {
+    case 'cats': return `${x.name}'s profile`;
+    case 'weights': return `${catName(x.catId)}'s weight · ${x.kg} kg`;
+    case 'feedings': return `${catName(x.catId)}'s meal at ${x.time}${x.food ? ` (${x.food})` : ''}`;
+    case 'events': return `${catName(x.catId)} · ${x.type} on ${fmtShort(x.date)}`;
+    case 'transactions': return `${x.type === 'income' ? 'Income' : 'Spending'} · ${x.description || x.category || ''} ${money(x.amount)}`;
+    case 'groceries': return x.name;
+    default: return '';
+  }
+}
+
+function activityItems(limit = 40) {
+  const items = [];
+  for (const col of Object.keys(MODULE_ICONS)) {
+    for (const x of S.db[col] || []) {
+      if (x.createdBy) items.push({ col, at: x.createdAt, who: x.createdBy, verb: 'added', what: describe(col, x) });
+      if (wasEdited(x)) {
+        const verb = col === 'groceries' ? (x.bought ? 'marked as bought' : 'updated') : 'updated';
+        items.push({ col, at: x.updatedAt, who: x.updatedBy, verb, what: describe(col, x) });
+      }
+    }
+  }
+  return items.sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit);
+}
+
+ACTIONS.activity = () => {
+  const items = activityItems();
+  const modal = $('#modal');
+  modal.innerHTML = `<form method="dialog">
+    <h3>🕘 Recent activity</h3>
+    ${items.length ? `<ul class="list activity">${items.map((a) => `<li>
+      ${personDot(a.who)}
+      <div class="grow"><div><strong>${esc(a.who)}</strong> ${a.verb} <span aria-hidden="true">${MODULE_ICONS[a.col]}</span> ${esc(a.what)}</div>
+      <div class="meta">${ago(a.at)}</div></div></li>`).join('')}</ul>`
+      : '<p class="empty">Nothing yet. Changes you both make will show up here.</p>'}
+    <div class="modal-actions"><span class="spacer"></span><button class="btn primary" value="close">Close</button></div>
+  </form>`;
+  modal.showModal();
+};
+
+// ============================================================
 // Cats
 // ============================================================
 const EVENT_TYPES = ['Vaccination', 'Deflea', 'Deworm', 'Vet visit', 'Grooming', 'Medication', 'Birthday', 'Other'];
@@ -433,10 +526,27 @@ const EVENT_ICONS = { Vaccination: '💉', Deflea: '🪲', Deworm: '💊', 'Vet 
 
 function currentCat() {
   const cats = S.db.cats;
+  if (S.catId === 'all') return null;
   let cat = cats.find((c) => c.id === S.catId);
-  if (!cat && cats.length) { cat = cats[0]; S.catId = cat.id; }
+  if (!cat && cats.length) {
+    // Nothing (valid) picked yet: show the overview when there's more than one cat.
+    if (cats.length > 1) { S.catId = 'all'; return null; }
+    cat = cats[0]; S.catId = cat.id;
+  }
   return cat;
 }
+
+// Each cat gets its own colour, in the order they were added (so lines on the graph never clash).
+const catColor = (cat) => {
+  const order = (S.db?.cats || []).slice()
+    .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '') || a.id.localeCompare(b.id));
+  const i = Math.max(0, order.findIndex((c) => c.id === cat.id));
+  return CAT_COLORS[i % CAT_COLORS.length];
+};
+const weightsOf = (catId) => S.db.weights.filter((w) => w.catId === catId)
+  .sort((a, b) => a.date.localeCompare(b.date) || (a.createdAt || '').localeCompare(b.createdAt || ''));
+const kgDiff = (a, b) => Math.round((a - b) * 100) / 100;
+const diffBadge = (d) => d ? `<span class="badge">${d > 0 ? '▲ +' : '▼ '}${d} kg</span>` : '';
 
 function upcomingReminders() {
   // The latest event of each (cat, type) with a next-due date within 30 days (or overdue).
@@ -454,11 +564,14 @@ function upcomingReminders() {
 function renderCats() {
   const cats = S.db.cats;
   const cat = currentCat();
-  const chips = `<div class="chips">${cats.map((c) => `<button class="chip" data-action="pickCat" data-id="${c.id}" aria-pressed="${c.id === cat?.id}">
+  const chips = `<div class="chips">
+    ${cats.length ? `<button class="chip" data-action="pickCat" data-id="all" aria-pressed="${S.catId === 'all'}">
+      <span class="avatar all" aria-hidden="true">🐾</span>All cats</button>` : ''}
+    ${cats.map((c) => `<button class="chip" data-action="pickCat" data-id="${c.id}" aria-pressed="${c.id === cat?.id}">
       ${avatar(c)}${esc(c.name)}</button>`).join('')}
     <button class="chip add" data-action="addCat">＋ Add cat</button></div>`;
 
-  if (!cat) {
+  if (!cats.length) {
     return chips + `<div class="card empty"><p style="font-size:2.5rem;margin:0">🐾</p>
       <p>No cats yet. Add your first cat to start tracking weight, feeding and vet dates.</p>
       <button class="btn primary" data-action="addCat">Add a cat</button></div>`;
@@ -473,7 +586,9 @@ function renderCats() {
         <div class="meta muted small">Last done ${fmtDate(e.date)}</div></div>${dueBadge(e.nextDue)}</div>`).join('')}
     </div>` : '';
 
-  const weights = S.db.weights.filter((w) => w.catId === cat.id).sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt));
+  if (!cat) return chips + remindersHtml + renderCatsOverview();
+
+  const weights = weightsOf(cat.id);
   const latestW = weights[weights.length - 1];
   const feedings = S.db.feedings.filter((f) => f.catId === cat.id).sort((a, b) => a.time.localeCompare(b.time));
   const events = S.db.events.filter((e) => e.catId === cat.id).sort((a, b) => b.date.localeCompare(a.date));
@@ -490,17 +605,18 @@ function renderCats() {
       <button class="btn" data-action="editCat" data-id="${cat.id}">Edit</button></div>
     ${facts.length ? `<div class="facts">${facts.map(([k, v]) => `<div><span>${k}</span>${esc(v)}</div>`).join('')}</div>` : ''}
     ${cat.notes ? `<p class="notes">${esc(cat.notes)}</p>` : ''}
+    <div class="small" style="margin-top:12px">${byline(cat)}</div>
   </div>`;
 
   const weightCard = `<div class="card">
     <div class="section-head"><h2>⚖️ Weight</h2><button class="btn primary" data-action="addWeight">＋ Log weight</button></div>
-    ${weights.length >= 2 ? weightChart(weights) : ''}
+    ${weights.length ? weightChart([{ name: cat.name, color: null, points: weights }]) : ''}
     ${weights.length ? `<ul class="list">${weights.slice().reverse().slice(0, S.showAllWeights ? undefined : 6).map((w) => {
       const i = weights.indexOf(w), prev = weights[i - 1];
-      const diff = prev ? Math.round((w.kg - prev.kg) * 100) / 100 : null;
       return `<li class="clickable" data-action="editWeight" data-id="${w.id}">
-        <div class="grow"><div class="title">${w.kg} kg</div><div class="meta">${fmtDate(w.date)}${w.notes ? ' · ' + esc(w.notes) : ''}</div></div>
-        ${diff !== null && diff !== 0 ? `<span class="badge">${diff > 0 ? '▲ +' : '▼ '}${diff} kg</span>` : ''}</li>`;
+        <div class="grow"><div class="title">${w.kg} kg</div><div class="meta">${fmtDate(w.date)}${w.notes ? ' · ' + esc(w.notes) : ''}</div>
+        <div class="meta">${byline(w)}</div></div>
+        ${prev ? diffBadge(kgDiff(w.kg, prev.kg)) : ''}</li>`;
     }).join('')}</ul>
     ${weights.length > 6 ? `<button class="btn ghost" data-action="toggleWeights">${S.showAllWeights ? 'Show less' : `Show all ${weights.length}`}</button>` : ''}`
     : `<p class="empty">No weigh-ins yet.</p>`}
@@ -511,7 +627,7 @@ function renderCats() {
     ${feedings.length ? `<ul class="list">${feedings.map((f) => `<li class="clickable" data-action="editFeeding" data-id="${f.id}">
       <span class="time-pill">${esc(f.time)}</span>
       <div class="grow"><div class="title">${esc(f.food || 'Meal')}${f.amount ? ` <span class="muted">· ${esc(f.amount)}</span>` : ''}</div>
-      ${f.notes ? `<div class="meta">${esc(f.notes)}</div>` : ''}</div></li>`).join('')}</ul>`
+      ${f.notes ? `<div class="meta">${esc(f.notes)}</div>` : ''}<div class="meta">${byline(f)}</div></div></li>`).join('')}</ul>`
     : `<p class="empty">No meals scheduled.</p>`}
   </div>`;
 
@@ -520,7 +636,8 @@ function renderCats() {
     ${events.length ? `<ul class="list">${events.map((e) => `<li class="clickable" data-action="editEvent" data-id="${e.id}">
       <span style="font-size:1.4rem" aria-hidden="true">${EVENT_ICONS[e.type] || '📌'}</span>
       <div class="grow"><div class="title">${esc(e.type)}</div>
-      <div class="meta">${fmtDate(e.date)}${e.nextDue ? ` · next ${fmtDate(e.nextDue)}` : ''}${e.notes ? ' · ' + esc(e.notes) : ''}</div></div>
+      <div class="meta">${fmtDate(e.date)}${e.nextDue ? ` · next ${fmtDate(e.nextDue)}` : ''}${e.notes ? ' · ' + esc(e.notes) : ''}</div>
+      <div class="meta">${byline(e)}</div></div>
       ${e.nextDue ? dueBadge(e.nextDue) : ''}</li>`).join('')}</ul>`
     : `<p class="empty">Record vaccines, deflea and deworm treatments, vet visits and more. Set a "next due" date to get a reminder.</p>`}
   </div>`;
@@ -528,28 +645,89 @@ function renderCats() {
   return chips + remindersHtml + profile + eventsCard + weightCard + feedingCard;
 }
 
-function weightChart(weights) {
-  const W = 360, H = 150, P = { l: 30, r: 8, t: 10, b: 20 };
-  const pts = weights.slice(-24);
-  const xs = pts.map((w) => parseDate(w.date).getTime());
-  const ys = pts.map((w) => w.kg);
+// series: [{ name, color (null = theme accent with shaded area), points: [{ date, kg }] }]
+function weightChart(series) {
+  const W = 360, H = 160, P = { l: 30, r: 10, t: 10, b: 20 };
+  series = series.map((s) => ({ ...s, points: s.points.slice(-24) })).filter((s) => s.points.length);
+  const all = series.flatMap((s) => s.points);
+  const xs = all.map((w) => parseDate(w.date).getTime());
+  const ys = all.map((w) => w.kg);
   let minY = Math.min(...ys), maxY = Math.max(...ys);
   const padY = Math.max((maxY - minY) * 0.2, 0.2);
   minY = Math.max(0, minY - padY); maxY += padY;
   const minX = Math.min(...xs), maxX = Math.max(...xs);
-  const x = (t) => P.l + (maxX === minX ? 0.5 : (t - minX) / (maxX - minX)) * (W - P.l - P.r);
+  const x = (d) => P.l + (maxX === minX ? 0.5 : (parseDate(d).getTime() - minX) / (maxX - minX)) * (W - P.l - P.r);
   const y = (v) => P.t + (1 - (v - minY) / (maxY - minY)) * (H - P.t - P.b);
-  const line = pts.map((w, i) => `${i ? 'L' : 'M'}${x(xs[i]).toFixed(1)},${y(w.kg).toFixed(1)}`).join('');
-  const area = `${line}L${x(xs[xs.length - 1]).toFixed(1)},${H - P.b}L${x(xs[0]).toFixed(1)},${H - P.b}Z`;
   const ticks = [minY, (minY + maxY) / 2, maxY];
+  const first = all.reduce((a, b) => (a.date < b.date ? a : b)).date;
+  const last = all.reduce((a, b) => (a.date > b.date ? a : b)).date;
+
+  const lines = series.map((s) => {
+    const d = s.points.map((w, i) => `${i ? 'L' : 'M'}${x(w.date).toFixed(1)},${y(w.kg).toFixed(1)}`).join('');
+    const stroke = s.color ? ` style="stroke:${s.color}"` : '';
+    const area = !s.color && s.points.length > 1
+      ? `<path class="area" d="${d}L${x(s.points[s.points.length - 1].date).toFixed(1)},${H - P.b}L${x(s.points[0].date).toFixed(1)},${H - P.b}Z"/>` : '';
+    return `${area}${s.points.length > 1 ? `<path class="line" d="${d}"${stroke}/>` : ''}
+      ${s.points.map((w) => `<circle class="dot" cx="${x(w.date)}" cy="${y(w.kg)}" r="3.5"${stroke}>
+        <title>${esc(s.name)} · ${fmtDate(w.date)}: ${w.kg} kg</title></circle>`).join('')}`;
+  }).join('');
+
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Weight over time">
     ${ticks.map((t) => `<line class="grid" x1="${P.l}" x2="${W - P.r}" y1="${y(t)}" y2="${y(t)}"/>
       <text x="${P.l - 6}" y="${y(t) + 4}" text-anchor="end">${t.toFixed(1)}</text>`).join('')}
-    <path class="area" d="${area}"/><path class="line" d="${line}"/>
-    ${pts.map((w, i) => `<circle class="dot" cx="${x(xs[i])}" cy="${y(w.kg)}" r="3.5"><title>${fmtDate(w.date)}: ${w.kg} kg</title></circle>`).join('')}
-    <text x="${P.l}" y="${H - 6}">${fmtShort(pts[0].date)}</text>
-    <text x="${W - P.r}" y="${H - 6}" text-anchor="end">${fmtShort(pts[pts.length - 1].date)}</text>
+    ${lines}
+    ${first === last
+      ? `<text x="${W / 2}" y="${H - 5}" text-anchor="middle">${fmtShort(first)}</text>`
+      : `<text x="${P.l}" y="${H - 5}">${fmtShort(first)}</text><text x="${W - P.r}" y="${H - 5}" text-anchor="end">${fmtShort(last)}</text>`}
   </svg>`;
+}
+
+function renderCatsOverview() {
+  const cats = S.db.cats.slice().sort((a, b) => a.name.localeCompare(b.name));
+  const series = cats.map((c) => ({ cat: c, name: c.name, color: catColor(c), points: weightsOf(c.id) }));
+  const withWeights = series.filter((s) => s.points.length);
+
+  const chartCard = `<div class="card">
+    <div class="section-head"><h2>⚖️ Weight · all cats</h2><button class="btn primary" data-action="addWeight">＋ Log weight</button></div>
+    ${withWeights.length ? weightChart(withWeights) + `<div class="legend">${withWeights.map((s) => {
+      const lastW = s.points[s.points.length - 1];
+      return `<button class="legend-item" data-action="pickCat" data-id="${s.cat.id}">
+        <i style="background:${s.color}"></i>${esc(s.name)} <strong>${lastW.kg} kg</strong></button>`;
+    }).join('')}</div>` : '<p class="empty">No weigh-ins yet. Log a weight to see the graph.</p>'}
+  </div>`;
+
+  const nextDue = (catId) => upcomingAll().find((e) => e.catId === catId);
+  const cards = cats.map((c) => {
+    const ws = weightsOf(c.id), lastW = ws[ws.length - 1], prevW = ws[ws.length - 2];
+    const meals = S.db.feedings.filter((f) => f.catId === c.id).sort((a, b) => a.time.localeCompare(b.time));
+    const due = nextDue(c.id);
+    // Most recent change to anything about this cat.
+    const related = [c, ...ws, ...meals, ...S.db.events.filter((e) => e.catId === c.id)];
+    const latest = related.reduce((a, b) => ((b.updatedAt || '') > (a.updatedAt || '') ? b : a), c);
+    return `<div class="cat-card" role="button" tabindex="0" data-action="pickCat" data-id="${c.id}" aria-label="Open ${esc(c.name)}">
+      <div class="row">${avatar(c)}<div class="grow"><div class="title">${esc(c.name)}</div>
+        <div class="meta">${esc([c.sex, age(c.birthday)].filter(Boolean).join(' · ') || c.breed || '')}</div></div>
+        <span class="muted" aria-hidden="true">›</span></div>
+      <dl>
+        <div><dt>Weight</dt><dd>${lastW ? `${lastW.kg} kg ${prevW ? diffBadge(kgDiff(lastW.kg, prevW.kg)) : ''}<span class="meta"> · ${fmtShort(lastW.date)}</span>` : '<span class="muted">—</span>'}</dd></div>
+        <div><dt>Next up</dt><dd>${due ? `${esc(due.type)} ${dueBadge(due.nextDue)}` : '<span class="muted">Nothing scheduled</span>'}</dd></div>
+        <div><dt>Meals</dt><dd>${meals.length ? meals.map((m) => esc(m.time)).join(', ') : '<span class="muted">—</span>'}</dd></div>
+      </dl>
+      <div class="small">${byline(latest)}</div>
+    </div>`;
+  }).join('');
+
+  return chartCard + `<div class="cat-grid">${cards}</div>`;
+}
+
+// Latest next-due date per (cat, type), soonest first — no 30-day limit.
+function upcomingAll() {
+  const latest = new Map();
+  for (const e of S.db.events) {
+    const key = e.catId + '|' + e.type, prev = latest.get(key);
+    if (!prev || e.date > prev.date) latest.set(key, e);
+  }
+  return [...latest.values()].filter((e) => e.nextDue).sort((a, b) => a.nextDue.localeCompare(b.nextDue));
 }
 
 ACTIONS.pickCat = (id) => { S.catId = id; store.set('catId', id); render(); };
@@ -558,6 +736,7 @@ ACTIONS.toggleWeights = () => { S.showAllWeights = !S.showAllWeights; render(); 
 function catForm(cat) {
   openForm({
     title: cat ? `Edit ${cat.name}` : 'Add a cat',
+    meta: history(cat),
     fields: [
       { name: 'photo', type: 'photo', value: cat?.photo || '', preview: cat?.photo ? avatar(cat, 'lg') : '' },
       { name: 'name', label: 'Name', required: true, value: cat?.name },
@@ -582,15 +761,20 @@ ACTIONS.addCat = () => catForm(null);
 ACTIONS.editCat = (id) => catForm(S.db.cats.find((c) => c.id === id));
 
 function weightForm(w) {
+  const picked = currentCat();
+  const needsCat = !w && !picked;
+  const cats = S.db.cats.slice().sort((a, b) => a.name.localeCompare(b.name));
   openForm({
-    title: w ? 'Edit weight' : `Log weight — ${currentCat().name}`,
+    title: w ? 'Edit weight' : picked ? `Log weight — ${picked.name}` : 'Log weight',
+    meta: history(w),
     fields: [
+      ...(needsCat ? [{ name: 'catId', label: 'Cat', type: 'select', required: true, value: cats[0]?.id, options: cats.map((c) => ({ value: c.id, label: c.name })) }] : []),
       { name: 'kg', label: 'Weight (kg)', type: 'number', step: '0.01', min: 0, required: true, value: w?.kg },
       { name: 'date', label: 'Date', type: 'date', required: true, value: w?.date || today() },
       { name: 'notes', label: 'Notes', value: w?.notes },
     ],
     onSubmit: (v) => w ? save('weights', w.id, v, 'Saved')
-      : save('weights', null, { ...v, catId: S.catId }, 'Weight logged'),
+      : save('weights', null, { ...v, catId: v.catId || S.catId }, 'Weight logged'),
     onDelete: w ? () => remove('weights', w.id, 'Deleted') : null,
   });
 }
@@ -601,6 +785,7 @@ function feedingForm(f) {
   const foods = [...new Set(S.db.feedings.map((x) => x.food).filter(Boolean))];
   openForm({
     title: f ? 'Edit meal' : `Add meal — ${currentCat().name}`,
+    meta: history(f),
     fields: [
       { name: 'time', label: 'Time', type: 'time', required: true, value: f?.time || '08:00' },
       { name: 'food', label: 'Food', value: f?.food, placeholder: 'e.g. Wet food (chicken)', suggestions: foods },
@@ -619,6 +804,7 @@ function eventForm(ev) {
   const types = ev && !EVENT_TYPES.includes(ev.type) ? [...EVENT_TYPES, ev.type] : EVENT_TYPES;
   openForm({
     title: ev ? 'Edit date' : `Add important date — ${currentCat().name}`,
+    meta: history(ev),
     fields: [
       { name: 'type', label: 'What', type: 'select', options: types, required: true, value: ev?.type || 'Vaccination' },
       { name: 'date', label: 'Date done', type: 'date', required: true, value: ev?.date || today() },
@@ -656,7 +842,8 @@ function renderMoney() {
 
   const txItem = (t) => `<li class="clickable" data-action="editTx" data-id="${t.id}">
     <div class="grow"><div class="title">${esc(t.description || t.category || (t.type === 'income' ? 'Income' : 'Expense'))}</div>
-    <div class="meta">${[t.description ? t.category : '', fmtShort(t.date), t.createdBy ? 'by ' + t.createdBy : ''].filter(Boolean).map(esc).join(' · ')}</div></div>
+    <div class="meta">${[t.description ? t.category : '', fmtShort(t.date)].filter(Boolean).map(esc).join(' · ')}</div>
+    <div class="meta">${byline(t)}</div></div>
     <span class="amount ${t.type}">${t.type === 'income' ? '+' : '−'}${money(t.amount)}</span></li>`;
 
   return `
@@ -709,6 +896,7 @@ function txForm(t, type) {
   const cats = type === 'income' ? INCOME_CATS : EXPENSE_CATS;
   openForm({
     title: `${t ? 'Edit' : 'Add'} ${type === 'income' ? 'income' : 'spending'}`,
+    meta: history(t),
     fields: [
       { name: 'type', type: 'segment', label: 'Type', value: type, options: [{ value: 'expense', label: 'Spending' }, { value: 'income', label: 'Income' }] },
       { name: 'amount', label: `Amount (${S.db.settings.currency})`, type: 'number', step: '0.01', min: 0, required: true, value: t?.amount },
@@ -746,7 +934,8 @@ function renderGrocery() {
     <button class="check ${g.bought ? 'on' : ''}" data-action="toggleGrocery" data-id="${g.id}" aria-label="${g.bought ? 'Mark as needed' : 'Mark as bought'}">✓</button>
     <div class="grow clickable" data-action="editGrocery" data-id="${g.id}" style="cursor:pointer">
       <div class="title">${esc(g.name)}${g.quantity ? ` <span class="muted">· ${esc(g.quantity)}</span>` : ''}</div>
-      <div class="meta">${g.bought ? `Bought ${fmtDate(g.boughtDate)}` : `Out since ${fmtDate(g.addedDate)}`}${g.createdBy ? ' · added by ' + esc(g.createdBy) : ''}${g.note ? ' · ' + esc(g.note) : ''}</div>
+      <div class="meta">${g.bought ? `Bought ${fmtDate(g.boughtDate)}` : `Out since ${fmtDate(g.addedDate)}`}${g.note ? ' · ' + esc(g.note) : ''}</div>
+      <div class="meta">${g.bought ? byline(g, 'Bought') : byline(g)}</div>
     </div></li>`;
 
   return `
@@ -793,6 +982,7 @@ ACTIONS.editGrocery = (id) => {
   const g = S.db.groceries.find((x) => x.id === id);
   openForm({
     title: 'Edit item',
+    meta: history(g),
     fields: [
       { name: 'name', label: 'Item', required: true, value: g.name },
       { name: 'quantity', label: 'Quantity', value: g.quantity },

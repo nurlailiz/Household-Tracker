@@ -4,9 +4,12 @@ A shared web app for two people, built on **Firebase**. You each sign in with a 
 
 ## Modules
 
+**Who changed what:** every cat record, weight, meal, date, income, spending and grocery item shows who added it or last updated it, and when (for example *Updated by Husband · 5m ago*). Edit forms show the full history. The 🕘 button lists recent activity from both of you across all modules.
+
 ### 🐱 Cats
 - **Profiles** for multiple cats: photo, breed, sex, birthday (age worked out for you), colour, microchip and notes
-- **Weight log** with a trend chart and the change since the last weigh-in
+- **All cats overview**: one combined weight graph (one coloured line per cat) and a card for each cat with latest weight, next due date and meal times
+- **Weight log** with a graph for each cat and the change since the last weigh-in
 - **Feeding schedule** ordered by time
 - **Important dates** (vaccination, deflea, deworm, vet visit…). Add a *next due* date and it appears under **Coming up** 30 days before. It turns amber 14 days out and red when overdue.
 
