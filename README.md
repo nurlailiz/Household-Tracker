@@ -53,9 +53,26 @@ Then either:
 
 Even if someone finds the app's address, they can't sign up (step 3). Even a signed-in account that isn't one of yours can't read or change anything (step 5).
 
-## Putting the app online (Firebase Hosting, free)
+## Putting the app online — deploys from GitHub
 
-On a computer with Node.js installed, from this folder:
+`.github/workflows/deploy.yml` publishes the app and `firestore.rules` to Firebase Hosting **every time something is pushed or merged to `main`**. You can also run it by hand: **Actions → Deploy to Firebase → Run workflow**.
+
+The app lives at **https://household-tracker-ea124.web.app**. Open it on both phones and use **Add to Home Screen** to get an app icon.
+
+### One-time: give GitHub a deploy key
+
+1. Open https://console.cloud.google.com/iam-admin/serviceaccounts?project=household-tracker-ea124 → **Create service account**
+   - Name: `github-deploy` → **Create and continue**
+   - Add these roles: **Firebase Hosting Admin**, **Firebase Rules Admin**, **Service Usage Consumer**, **API Keys Viewer** → **Done**
+2. Click the new account → **Keys → Add key → Create new key → JSON**. A `.json` file downloads.
+3. On GitHub, open this repo → **Settings → Secrets and variables → Actions → New repository secret**
+   - Name: `FIREBASE_SERVICE_ACCOUNT`
+   - Value: paste the **entire contents** of the downloaded `.json` file → **Add secret**
+4. Delete the downloaded file from your computer. Anyone holding it can deploy to your project.
+
+The workflow refuses to deploy while `firestore.rules` still says `USERNAME_1` or `USERNAME_2`, so fill those in first (setup step 5).
+
+### Deploying by hand instead (optional)
 
 ```bash
 npx firebase-tools login
@@ -65,9 +82,7 @@ npx firebase-tools login
 npm run deploy
 ```
 
-Your app will be at **https://household-tracker-ea124.web.app**. Open it on both phones and use **Add to Home Screen** to get an app icon.
-
-To try it on your own computer first, run `npm start` and open http://localhost:3000. It uses the same live database.
+To try it on your own computer, run `npm start` and open http://localhost:3000. It uses the same live database.
 
 ## Files
 
@@ -76,4 +91,5 @@ To try it on your own computer first, run `npm start` and open http://localhost:
   - `app.js`: the screens plus Firestore sync and sign-in
 - `firestore.rules`: who may read and write data
 - `firebase.json`, `.firebaserc`: settings for Firebase Hosting and deploy
+- `.github/workflows/deploy.yml`: automatic deploy from GitHub
 - `serve.js`: tiny local web server for `npm start`
