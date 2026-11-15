@@ -772,7 +772,7 @@ function renderCats() {
     : `<p class="empty">Record vaccines, deflea and deworm treatments, vet visits and more. Set a "next due" date to get a reminder.</p>`}
   </div>`;
 
-  return chips + remindersHtml + profile + eventsCard + weightCard + feedingCard;
+  return chips + profile + eventsCard + weightCard + feedingCard;
 }
 
 // series: [{ name, color (null = theme accent with shaded area), points: [{ date, kg }] }]

@@ -11,7 +11,7 @@ A shared web app for two people, built on **Firebase**. You each sign in with a 
 - **All cats overview**: one combined weight graph (one coloured line per cat) and a card for each cat with latest weight, next due date and meal times
 - **Weight log** with a graph for each cat and the change since the last weigh-in
 - **Feeding schedule** ordered by time
-- **Important dates** (vaccination, deflea, deworm, vet visit…). Add a *next due* date and it appears under **Coming up** 30 days before. It turns amber 14 days out and red when overdue.
+- **Important dates** (vaccination, deflea, deworm, vet visit…). Add a *next due* date and it appears under **Coming up** in the **All cats** overview 30 days before. It turns amber 14 days out and red when overdue.
 
 **Importing records:** ⚙️ Settings → **📥 Import cat records** takes an import file (`.json`), shows a preview, then saves it under your name. Cats are matched by name, and anything already in the app is skipped, so importing the same file twice is safe. Keep import files out of this repo, because it's public.
 
