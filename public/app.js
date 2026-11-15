@@ -342,7 +342,7 @@ const AUTH_ERRORS = {
 function renderLogin(message = '') {
   $('#modal').open && $('#modal').close();
   $('#app').innerHTML = `<div class="login">
-    <img src="/icon.svg" alt="">
+    <img src="./icon.svg" alt="">
     <h1>Our Home</h1>
     <p class="muted">Cats, money and groceries — shared.</p>
     <form id="loginForm">
@@ -385,7 +385,7 @@ function render() {
   const body = { cats: renderCats, money: renderMoney, grocery: renderGrocery }[S.tab] || renderCats;
   $('#app').innerHTML = `
     <header class="topbar">
-      <h1><img src="/icon.svg" alt="">Our Home</h1>
+      <h1><img src="./icon.svg" alt="">Our Home</h1>
       <span class="who">Hi, ${esc(S.me)}</span>
       <button class="btn icon ghost" data-action="settings" title="Settings" aria-label="Settings">⚙️</button>
     </header>

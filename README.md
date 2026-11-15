@@ -49,38 +49,23 @@ After this, new accounts can only be created by you in the console.
 Open `firestore.rules` and replace `USERNAME_1` and `USERNAME_2` with your two usernames from step 2.
 Then either:
 - copy the whole file into **Firestore Database → Rules** and click **Publish**, or
-- run `npm run deploy` (see below), which publishes the rules and the app together.
+- run `npx firebase-tools deploy --only firestore:rules` from a computer with Node.js.
 
 Even if someone finds the app's address, they can't sign up (step 3). Even a signed-in account that isn't one of yours can't read or change anything (step 5).
 
-## Putting the app online — deploys from GitHub
+## Putting the app online: GitHub Pages (free, no keys)
 
-`.github/workflows/deploy.yml` publishes the app and `firestore.rules` to Firebase Hosting **every time something is pushed or merged to `main`**. You can also run it by hand: **Actions → Deploy to Firebase → Run workflow**.
+`.github/workflows/pages.yml` publishes the `public/` folder to GitHub Pages **every time something is pushed or merged to `main`**. You can also run it by hand: **Actions → Deploy to GitHub Pages → Run workflow**.
 
-The app lives at **https://household-tracker-ea124.web.app**. Open it on both phones and use **Add to Home Screen** to get an app icon.
+The app lives at **https://nurlailiz.github.io/Household-Tracker/**. Open it on both phones and use **Add to Home Screen** to get an app icon.
 
-### One-time: give GitHub a deploy key
+### One-time setup
 
-1. Open https://console.cloud.google.com/iam-admin/serviceaccounts?project=household-tracker-ea124 → **Create service account**
-   - Name: `github-deploy` → **Create and continue**
-   - Add these roles: **Firebase Hosting Admin**, **Firebase Rules Admin**, **Service Usage Consumer**, **API Keys Viewer** → **Done**
-2. Click the new account → **Keys → Add key → Create new key → JSON**. A `.json` file downloads.
-3. On GitHub, open this repo → **Settings → Secrets and variables → Actions → New repository secret**
-   - Name: `FIREBASE_SERVICE_ACCOUNT`
-   - Value: paste the **entire contents** of the downloaded `.json` file → **Add secret**
-4. Delete the downloaded file from your computer. Anyone holding it can deploy to your project.
-
-The workflow refuses to deploy while `firestore.rules` still says `USERNAME_1` or `USERNAME_2`, so fill those in first (setup step 5).
-
-### Deploying by hand instead (optional)
-
-```bash
-npx firebase-tools login
-```
-
-```bash
-npm run deploy
-```
+1. **Create `main`:** on GitHub, open the branch dropdown, type `main`, and create it. Then make it the default branch under **Settings → General → Default branch**.
+2. **Turn on Pages:** go to **Settings → Pages → Build and deployment → Source** and choose **GitHub Actions**.
+3. **Allow sign-in from GitHub Pages:** in the Firebase console, go to **Authentication → Settings → Authorized domains → Add domain** and enter `nurlailiz.github.io`.
+4. **Publish the database rules** (setup step 5): paste `firestore.rules` into **Firestore Database → Rules → Publish**.
+   GitHub Pages only hosts the app; it doesn't touch Firebase. So whenever you change `firestore.rules`, paste it into the console again.
 
 To try it on your own computer, run `npm start` and open http://localhost:3000. It uses the same live database.
 
@@ -90,6 +75,6 @@ To try it on your own computer, run `npm start` and open http://localhost:3000. 
   - `firebase-config.js`: your Firebase project config. These values are public by design; security comes from steps 3 and 5.
   - `app.js`: the screens plus Firestore sync and sign-in
 - `firestore.rules`: who may read and write data
-- `firebase.json`, `.firebaserc`: settings for Firebase Hosting and deploy
-- `.github/workflows/deploy.yml`: automatic deploy from GitHub
+- `firebase.json`, `.firebaserc`: Firebase CLI settings (only needed if you deploy rules from the command line)
+- `.github/workflows/pages.yml`: automatic deploy to GitHub Pages
 - `serve.js`: tiny local web server for `npm start`

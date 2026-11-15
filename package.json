@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "start": "node serve.js",
-    "deploy": "npx firebase-tools deploy --only hosting,firestore:rules"
+    "deploy-rules": "npx firebase-tools deploy --only firestore:rules"
   },
   "license": "MIT"
 }

@@ -1,9 +1,9 @@
 {
   "name": "Our Home",
   "short_name": "Our Home",
-  "start_url": "/",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#f6f4ef",
   "theme_color": "#3f7d6e",
-  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
 }
