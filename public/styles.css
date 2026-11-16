@@ -446,3 +446,7 @@ dialog form { overflow-x: hidden; }
 .day-group.cal .list { flex: 1; min-width: 0; }
 .day-group.cal .list > li { padding-left: 0; }
 .day-group.cal .title { overflow-wrap: anywhere; }
+
+/* ---------- Carry-over row ---------- */
+.carry-row > li { background: var(--accent-soft); border-radius: 10px; padding: 10px; margin-bottom: 4px; }
+.carry-ico { font-size: 1.2rem; color: var(--accent); width: 20px; text-align: center; }

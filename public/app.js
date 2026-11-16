@@ -1392,19 +1392,62 @@ function pocketsOf(p, includeUsed = true) {
 }
 const pocketSegment = (p, value) => pocketsOf(p).map((k) => ({ value: k, label: k }));
 
+// ---------- Carry-over ----------
+// Whatever is left in a pocket at the end of a budget period (income − spending, plus what it carried in)
+// carries into the next period. Only money left over carries; an overspent pocket starts the next period at 0.
+const round2 = (n) => Math.round(n * 100) / 100;
+function periodKeyOf(date, day) {
+  const m = date.slice(0, 7);
+  if (day <= 1) return m;
+  return date >= dayIn(m, day) ? shiftMonth(m, 1) : m;
+}
+function pocketBalances(p, offset = S.periodOffset) {
+  const day = periodStartDay(p);
+  const target = shiftMonth(currentPeriodKey(day), offset);
+  const byKey = new Map();
+  for (const t of S.db.transactions) {
+    if (personOf(t) !== p) continue;
+    const k = periodKeyOf(txDate(t), day);
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k).push(t);
+  }
+  let carry = {};
+  let key = [...byKey.keys()].sort()[0] || target;
+  for (let guard = 0; key < target && guard < 600; guard++, key = shiftMonth(key, 1)) {
+    const next = {};
+    const sums = {};
+    for (const t of byKey.get(key) || []) (sums[pocketOf(t)] ??= []).push(t);
+    for (const k of new Set([...Object.keys(carry), ...Object.keys(sums)])) {
+      const left = (carry[k] || 0) + (sums[k] || []).reduce((n, t) => n + (t.type === 'income' ? t.amount : -t.amount), 0);
+      if (left > 0.004) next[k] = round2(left);
+    }
+    carry = next;
+  }
+  const now = byKey.get(target) || [];
+  const out = {};
+  for (const k of new Set([...pocketsOf(p), ...Object.keys(carry)])) {
+    const mine = now.filter((t) => pocketOf(t) === k);
+    const inc = round2(mine.filter((t) => t.type === 'income').reduce((n, t) => n + t.amount, 0));
+    const spent = round2(mine.filter((t) => t.type === 'expense').reduce((n, t) => n + t.amount, 0));
+    const c = carry[k] || 0;
+    out[k] = { carry: c, inc, spent, left: round2(c + inc - spent) };
+  }
+  return out;
+}
+const carriedIn = (p, offset = S.periodOffset, pocket = null) =>
+  round2(Object.entries(pocketBalances(p, offset)).filter(([k]) => !pocket || k === pocket).reduce((n, [, b]) => n + b.carry, 0));
+
 function pocketsCard(who, tx) {
-  const names = pocketsOf(who);
+  const balances = pocketBalances(who);
+  const names = Object.keys(balances);
   const rows = names.map((name) => {
-    const mine = tx.filter((t) => pocketOf(t) === name);
-    const inc = mine.filter((t) => t.type === 'income').reduce((n, t) => n + t.amount, 0);
-    const out = mine.filter((t) => t.type === 'expense').reduce((n, t) => n + t.amount, 0);
-    const left = inc - out;
-    const pct = inc > 0 ? Math.min(100, (out / inc) * 100) : (out > 0 ? 100 : 0);
+    const { carry, inc, spent: out, left } = balances[name];
+    const pct = carry + inc > 0 ? Math.min(100, (out / (carry + inc)) * 100) : (out > 0 ? 100 : 0);
     return `<div class="pocket clickable ${S.pocket === name ? 'selected' : ''}" role="button" tabindex="0" data-action="pocketFilter" data-id="${esc(name)}" aria-pressed="${S.pocket === name}">
       <div class="row"><strong class="grow">${esc(name)}${name === MAIN_POCKET ? ' <span class="badge">default</span>' : ''}</strong>
         <span class="amount" style="color:${left < 0 ? 'var(--danger)' : 'inherit'}">${left < 0 ? 'Over ' : ''}${money(Math.abs(left))}${left < 0 ? '' : ' left'}</span></div>
-      <div class="meter ${out > inc && inc > 0 ? 'over' : ''}"><div style="width:${pct}%"></div></div>
-      <div class="meta">In ${money(inc)} · Spent ${money(out)}</div></div>`;
+      <div class="meter ${left < 0 ? 'over' : ''}"><div style="width:${pct}%"></div></div>
+      <div class="meta">${carry > 0 ? `Carried over ${money(carry)} · ` : ''}In ${money(inc)} · Spent ${money(out)}</div></div>`;
   }).join('');
   return `<div class="card">
     <div class="section-head"><h2>Pockets</h2>${who === S.me ? '<button class="btn ghost small" data-action="openPockets">Edit</button>' : ''}</div>
@@ -1425,12 +1468,14 @@ function renderMoney() {
   const tx = S.pocket ? period.tx.filter((t) => pocketOf(t) === S.pocket) : period.tx;
   const inc = tx.filter((t) => t.type === 'income').reduce((n, t) => n + t.amount, 0);
   const exp = tx.filter((t) => t.type === 'expense').reduce((n, t) => n + t.amount, 0);
-  const left = inc - exp;
+  const carry = who === 'all' ? round2(people().reduce((n, p) => n + carriedIn(p), 0)) : carriedIn(who, S.periodOffset, S.pocket);
+  const left = round2(inc + carry - exp);
+  const available = inc + carry;
   const showPocket = (t) => pocketsOf(personOf(t)).length > 1;
   const byDate = (a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt || '').localeCompare(a.createdAt || '');
   const income = tx.filter((t) => t.type === 'income').sort(byDate);
   const expenses = tx.filter((t) => t.type === 'expense').sort(byDate);
-  const pct = inc > 0 ? Math.min(100, (exp / inc) * 100) : (exp > 0 ? 100 : 0);
+  const pct = available > 0 ? Math.min(100, (exp / available) * 100) : (exp > 0 ? 100 : 0);
 
   // Spending list filter by pocket (only filters the Spending list; the Pockets card filters the whole page).
   const spendPockets = who === 'all' ? [...new Set(people().flatMap((p) => pocketsOf(p)))] : pocketsOf(who);
@@ -1482,8 +1527,8 @@ function renderMoney() {
     ${S.pocket ? `<p class="pocket-filter">Showing the <strong>${esc(S.pocket)}</strong> pocket only <button class="btn ghost small" data-action="pocketFilter" data-id="${esc(S.pocket)}">Show all</button></p>` : ''}
     ${who === 'all' ? `<div class="card"><div class="section-head"><h2>Each of you</h2></div>${people().map((p) => personBalance(p, S.periodOffset)).join('')}</div>` : pocketsCard(who, period.tx)}
     <div class="card">
-      <div class="row"><span class="grow small muted">${inc > 0 ? `${whose === 'Your' ? 'You have' : whose === 'Both of you' ? 'Together you have' : `${esc(who)} has`} spent ${Math.round((exp / inc) * 100)}% of income` : 'Add income for this period to see the balance'}</span></div>
-      <div class="meter ${exp > inc && inc > 0 ? 'over' : ''}"><div style="width:${pct}%"></div></div>
+      <div class="row"><span class="grow small muted">${available > 0 ? `${whose === 'Your' ? 'You have' : whose === 'Both of you' ? 'Together you have' : `${esc(who)} has`} spent ${Math.round((exp / available) * 100)}% of ${carry > 0 ? 'income + carried over' : 'income'}` : 'Add income for this period to see the balance'}</span></div>
+      <div class="meter ${exp > available && available > 0 ? 'over' : ''}"><div style="width:${pct}%"></div></div>
       ${!tx.some((t) => t.type === 'income') && prevIncome.length
         ? `<div class="row wrap" style="margin-top:12px"><button class="btn" data-action="copyIncome">Copy last period's income</button></div>` : ''}
     </div>
@@ -1491,7 +1536,10 @@ function renderMoney() {
       ${catRows.map(([c, v]) => `<div class="bar-row"><span>${esc(c)}</span><div class="meter"><div style="width:${(v / maxCat) * 100}%"></div></div>
         <span class="amount">${money(v)}</span></div>`).join('')}</div></div>` : ''}
     <div class="card"><div class="section-head"><h2>Income<small>${income.length}</small></h2></div>
-      ${income.length ? `<ul class="list">${income.map((t) => txItem(t)).join('')}</ul>` : '<p class="empty">No income added for this period.</p>'}</div>
+      ${carry > 0 ? `<ul class="list carry-row"><li><span class="carry-ico" aria-hidden="true">↪</span><div class="grow"><div class="title">Carried over from last period</div>
+        <div class="meta">${who === 'all' ? 'Leftovers from each of your pockets' : S.pocket ? `Left in ${esc(S.pocket)} last period` : 'Left in your pockets last period'}</div></div>
+        <span class="amount income">+${money(carry)}</span></li></ul>` : ''}
+      ${income.length ? `<ul class="list">${income.map((t) => txItem(t)).join('')}</ul>` : carry > 0 ? '' : '<p class="empty">No income added for this period.</p>'}</div>
     <div class="card"><div class="section-head"><h2>Spending<small>${shownSpending.length}</small></h2></div>
       ${spendChips}
       ${shownSpending.length ? spendingByDay(shownSpending, txItem)
@@ -1528,13 +1576,15 @@ function spendingByDay(expenses, txItem) {
 
 // One person's budget period at a glance (used on Home and in the Both tab).
 function personBalance(p, offset = 0) {
-  const { inc, exp, left, ranges } = periodTotals(p, offset);
-  const pct = inc > 0 ? Math.min(100, (exp / inc) * 100) : (exp > 0 ? 100 : 0);
+  const { inc, exp, ranges } = periodTotals(p, offset);
+  const carry = carriedIn(p, offset);
+  const left = round2(inc + carry - exp);
+  const pct = inc + carry > 0 ? Math.min(100, (exp / (inc + carry)) * 100) : (exp > 0 ? 100 : 0);
   return `<div class="balance clickable" role="button" tabindex="0" data-action="openMoney" data-id="${esc(p)}">
     <div class="row">${personDot(p)}<strong>${esc(p === S.me ? `${p} (you)` : p)}</strong><span class="grow">${roleBadge(p)}</span>
       <span class="amount" style="color:${left < 0 ? 'var(--danger)' : 'inherit'}">${left < 0 ? 'Over ' : ''}${money(Math.abs(left))}${left < 0 ? '' : ' left'}</span></div>
-    <div class="meter ${exp > inc && inc > 0 ? 'over' : ''}"><div style="width:${pct}%"></div></div>
-    <div class="meta">${fmtRange(ranges[p])} · Income ${money(inc)} · Spent ${money(exp)}</div>
+    <div class="meter ${left < 0 ? 'over' : ''}"><div style="width:${pct}%"></div></div>
+    <div class="meta">${fmtRange(ranges[p])} · Income ${money(inc)}${carry > 0 ? ` · Carried ${money(carry)}` : ''} · Spent ${money(exp)}</div>
   </div>`;
 }
 
