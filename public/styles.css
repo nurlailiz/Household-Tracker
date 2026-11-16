@@ -396,3 +396,16 @@ dialog form { overflow-x: hidden; }
 .period-title h2 { margin: 0; font-size: 1.1rem; }
 .period-title p { margin: 2px 0 0; font-size: .8rem; color: var(--muted); }
 .center { text-align: center; }
+
+/* ---------- Pockets ---------- */
+.pocket { padding: 10px 6px; border-top: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
+.pocket:first-of-type { border-top: 0; }
+.pocket:hover { background: var(--surface-2); }
+.pocket.selected { background: var(--accent-soft); }
+.pocket .meter { margin: 8px 0 4px; }
+.pocket .meta { color: var(--muted); font-size: .82rem; }
+.pocket .badge { margin-left: 6px; vertical-align: 1px; }
+.pocket-filter { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -4px 2px 12px; font-size: .9rem; }
+.field-label { font-size: .85rem; color: var(--muted); margin-bottom: 4px; }
+.seg.wrap { flex-wrap: wrap; }
+.seg.wrap label { flex: 1 1 auto; min-width: 72px; }

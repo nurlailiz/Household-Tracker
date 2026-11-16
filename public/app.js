@@ -140,7 +140,7 @@ const SCHEMA = {
   weights: { catId: 'str!', date: 'str!', kg: 'num!', notes: 'str' },
   feedings: { catId: 'str!', time: 'str!', food: 'str', amount: 'str', notes: 'str' },
   events: { catId: 'str!', type: 'str!', date: 'str!', nextDue: 'str', notes: 'str' },
-  transactions: { type: 'str!', amount: 'num!', month: 'str!', date: 'str', category: 'str', description: 'str', person: 'str' },
+  transactions: { type: 'str!', amount: 'num!', month: 'str!', date: 'str', category: 'str', description: 'str', person: 'str', pocket: 'str' },
   groceries: { name: 'str!', quantity: 'str', note: 'str', addedDate: 'str!', bought: 'bool', boughtDate: 'str', boughtBy: 'str', expiry: 'str' },
 };
 const COLLECTIONS = Object.keys(SCHEMA);
@@ -272,7 +272,7 @@ function openForm({ title, fields, submitLabel = 'Save', onSubmit, onDelete, del
     const req = f.required ? 'required' : '';
     const id = 'f_' + f.name;
     if (f.type === 'segment') {
-      return `<div class="seg" role="radiogroup" aria-label="${esc(f.label)}">${f.options.map((o) =>
+      return `${f.showLabel ? `<div class="field-label">${esc(f.label)}</div>` : ''}<div class="seg${f.wrap ? ' wrap' : ''}" data-seg="${f.name}" role="radiogroup" aria-label="${esc(f.label)}">${f.options.map((o) =>
         `<label><input type="radio" name="${f.name}" value="${esc(o.value)}" ${o.value === v ? 'checked' : ''}>${esc(o.label)}</label>`).join('')}</div>`;
     }
     if (f.type === 'photo') {
@@ -524,6 +524,7 @@ const MENU_ICONS = {
   household: '<path d="M3 11l9-7 9 7"></path><path d="M5 10v10h14V10"></path><path d="M10 20v-5h4v5"></path>',
   currency: '<circle cx="12" cy="12" r="8.5"></circle><path d="M14.5 9.2c-.5-.8-1.5-1.2-2.5-1.2-1.4 0-2.5.8-2.5 2s1.1 1.7 2.5 2 2.5.8 2.5 2-1.1 2-2.5 2c-1 0-2-.4-2.5-1.2M12 6.5v1.5M12 16v1.5"></path>',
   activity: '<circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5V12l3 2"></path>',
+  pockets: '<path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"></path><path d="M4 10h16"></path><path d="M15 14.5h2"></path>',
   period: '<rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M4 10h16M9 3v4M15 3v4"></path><path d="M8.5 14.5h3"></path>',
   refresh: '<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"></path><path d="M4 4v4h4"></path><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"></path><path d="M20 20v-4h-4"></path>',
   import: '<path d="M12 4v11"></path><path d="M7.5 10.5 12 15l4.5-4.5"></path><path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2"></path>',
@@ -559,6 +560,7 @@ function menuHtml() {
   return `<div class="menu" role="menu" aria-label="Settings">
     ${item('openHousehold', 'household', 'Household', esc(people().map((p) => roleOf(p) ? `${p} (${roleOf(p)})` : p).join(' · ')))}
     ${item('openCurrency', 'currency', 'Currency', esc(S.db.settings.currency))}
+    ${item('openPockets', 'pockets', 'Pockets', esc(`Yours: ${pocketsOf(S.me, false).join(', ')}`))}
     ${item('openPeriod', 'period', 'Budget period', esc(periodStartDay(S.me) > 1 ? `Yours starts on the ${ordinal(periodStartDay(S.me))}` : 'Yours: calendar month'))}
     ${item('activity', 'activity', 'Recent activity')}
     <button role="menuitem" class="menu-item ${refresh.fresh ? 'fresh' : ''}" data-action="forceRefresh" ${refresh.disabled ? 'disabled aria-disabled="true"' : ''}>
@@ -618,6 +620,41 @@ ACTIONS.openPeriod = fromMenu(() => {
     onSubmit: (v) => saveSettings({ periodStart: { ...(S.db.settings.periodStart || {}), [S.me]: Number(v.periodDay) || 1 } }, 'Budget period saved'),
   });
   $('#f_periodDay').addEventListener('change', (e) => { $('#periodPreview').innerHTML = preview(Number(e.target.value)); });
+});
+
+ACTIONS.openPockets = fromMenu(() => {
+  const extras = pocketsOf(S.me, false).slice(1);
+  const slots = extras.length + 2;
+  openForm({
+    title: 'Your pockets',
+    meta: `<p class="small muted" style="margin:-6px 0 14px"><strong>Main</strong> is always there and is the default. Add pockets like Meal, Selfcare or Clothes. Renaming keeps a pocket's entries; clearing a name removes the pocket and moves its entries to Main.</p>`,
+    fields: Array.from({ length: slots }, (_, i) => ({
+      name: `pocket_${i}`, label: i < extras.length ? `Pocket ${i + 2}` : 'New pocket', value: extras[i] || '',
+      placeholder: ['e.g. Meal', 'e.g. Selfcare', 'e.g. Clothes'][Math.max(0, i - extras.length)] || 'e.g. Savings',
+    })),
+    onSubmit: (v) => {
+      const next = [];
+      for (let i = 0; i < slots; i++) {
+        const name = (v[`pocket_${i}`] || '').trim().slice(0, 30);
+        if (name && name.toLowerCase() !== MAIN_POCKET.toLowerCase() && !next.some((x) => x.toLowerCase() === name.toLowerCase())) next.push(name);
+      }
+      // Renamed pockets keep their entries; removed ones go back to Main.
+      const moves = {};
+      extras.forEach((old, i) => {
+        const now = (v[`pocket_${i}`] || '').trim().slice(0, 30);
+        if (!now || now.toLowerCase() === MAIN_POCKET.toLowerCase()) moves[old] = MAIN_POCKET;
+        else if (now !== old) moves[old] = next.find((x) => x.toLowerCase() === now.toLowerCase()) || MAIN_POCKET;
+      });
+      const batch = writeBatch(fdb);
+      let n = 0;
+      for (const t of S.db.transactions) {
+        if (personOf(t) === S.me && t.pocket && moves[t.pocket]) { batch.update(doc(fdb, 'transactions', t.id), { pocket: moves[t.pocket] }); n++; }
+      }
+      if (n) background(batch.commit());
+      if (S.pocket && moves[S.pocket]) S.pocket = null;
+      saveSettings({ pockets: { ...(S.db.settings.pockets || {}), [S.me]: next } }, 'Pockets saved');
+    },
+  });
 });
 
 ACTIONS.signOut = fromMenu(() => signOut(auth));
@@ -1328,9 +1365,52 @@ function periodTotals(who, offset = S.periodOffset) {
   return { tx, inc, exp, left: inc - exp, ranges };
 }
 
+// ---------- Pockets ----------
+// Each person splits their money into pockets (Main is always there and is the default).
+// Income goes into a pocket and spending comes out of one.
+const MAIN_POCKET = 'Main';
+const pocketOf = (t) => t.pocket || MAIN_POCKET;
+function pocketsOf(p, includeUsed = true) {
+  const list = [MAIN_POCKET, ...(S.db.settings.pockets?.[p] || []).filter((x) => x && x !== MAIN_POCKET)];
+  if (includeUsed) for (const t of S.db.transactions) if (personOf(t) === p && !list.includes(pocketOf(t))) list.push(pocketOf(t));
+  return list;
+}
+const pocketSegment = (p, value) => pocketsOf(p).map((k) => ({ value: k, label: k }));
+
+function pocketsCard(who, tx) {
+  const names = pocketsOf(who);
+  const rows = names.map((name) => {
+    const mine = tx.filter((t) => pocketOf(t) === name);
+    const inc = mine.filter((t) => t.type === 'income').reduce((n, t) => n + t.amount, 0);
+    const out = mine.filter((t) => t.type === 'expense').reduce((n, t) => n + t.amount, 0);
+    const left = inc - out;
+    const pct = inc > 0 ? Math.min(100, (out / inc) * 100) : (out > 0 ? 100 : 0);
+    return `<div class="pocket clickable ${S.pocket === name ? 'selected' : ''}" role="button" tabindex="0" data-action="pocketFilter" data-id="${esc(name)}" aria-pressed="${S.pocket === name}">
+      <div class="row"><strong class="grow">${esc(name)}${name === MAIN_POCKET ? ' <span class="badge">default</span>' : ''}</strong>
+        <span class="amount" style="color:${left < 0 ? 'var(--danger)' : 'inherit'}">${left < 0 ? 'Over ' : ''}${money(Math.abs(left))}${left < 0 ? '' : ' left'}</span></div>
+      <div class="meter ${out > inc && inc > 0 ? 'over' : ''}"><div style="width:${pct}%"></div></div>
+      <div class="meta">In ${money(inc)} · Spent ${money(out)}</div></div>`;
+  }).join('');
+  return `<div class="card">
+    <div class="section-head"><h2>Pockets</h2>${who === S.me ? '<button class="btn ghost small" data-action="openPockets">Edit</button>' : ''}</div>
+    ${rows}
+    ${names.length === 1 && who === S.me ? '<p class="small muted" style="margin:8px 0 0">Split your money into pockets like Meal, Selfcare or Clothes: tap <strong>Edit</strong>.</p>' : ''}
+  </div>`;
+}
+
+ACTIONS.pocketFilter = (name) => { S.pocket = S.pocket === name ? null : name; render(); };
+
 function renderMoney() {
   const who = moneyWho();
-  const { tx, inc, exp, left, ranges } = periodTotals(who);
+  const period = periodTotals(who);
+  const { ranges } = period;
+  if (who === 'all' || (S.pocket && !pocketsOf(who).includes(S.pocket))) S.pocket = null;
+  // Tapping a pocket shows only that pocket's entries and totals.
+  const tx = S.pocket ? period.tx.filter((t) => pocketOf(t) === S.pocket) : period.tx;
+  const inc = tx.filter((t) => t.type === 'income').reduce((n, t) => n + t.amount, 0);
+  const exp = tx.filter((t) => t.type === 'expense').reduce((n, t) => n + t.amount, 0);
+  const left = inc - exp;
+  const showPocket = (t) => pocketsOf(personOf(t)).length > 1;
   const byDate = (a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt || '').localeCompare(a.createdAt || '');
   const income = tx.filter((t) => t.type === 'income').sort(byDate);
   const expenses = tx.filter((t) => t.type === 'expense').sort(byDate);
@@ -1344,7 +1424,8 @@ function renderMoney() {
   const txItem = (t) => `<li class="clickable" data-action="editTx" data-id="${t.id}">
     ${who === 'all' ? personDot(personOf(t)) : ''}
     <div class="grow"><div class="title">${esc(t.description || t.category || (t.type === 'income' ? 'Income' : 'Expense'))}</div>
-    <div class="meta">${[who === 'all' ? personOf(t) : '', t.description ? t.category : '', fmtShort(t.date)].filter(Boolean).map(esc).join(' · ')}</div>
+    <div class="meta">${[who === 'all' ? personOf(t) : '', t.description ? t.category : '', fmtShort(t.date),
+      showPocket(t) ? `${t.type === 'income' ? 'into' : 'from'} ${pocketOf(t)}` : ''].filter(Boolean).map(esc).join(' · ')}</div>
     <div class="meta">${byline(t)}</div></div>
     <span class="amount ${t.type}">${t.type === 'income' ? '+' : '−'}${money(t.amount)}</span></li>`;
 
@@ -1372,7 +1453,8 @@ function renderMoney() {
       <div class="stat"><span>Spent</span><strong class="amount expense">${money(exp)}</strong></div>
       <div class="stat"><span>${left < 0 ? 'Over by' : 'Left'}</span><strong class="amount" style="color:${left < 0 ? 'var(--danger)' : 'inherit'}">${money(Math.abs(left))}</strong></div>
     </div>
-    ${who === 'all' ? `<div class="card"><div class="section-head"><h2>Each of you</h2></div>${people().map((p) => personBalance(p, S.periodOffset)).join('')}</div>` : ''}
+    ${S.pocket ? `<p class="pocket-filter">Showing the <strong>${esc(S.pocket)}</strong> pocket only <button class="btn ghost small" data-action="pocketFilter" data-id="${esc(S.pocket)}">Show all</button></p>` : ''}
+    ${who === 'all' ? `<div class="card"><div class="section-head"><h2>Each of you</h2></div>${people().map((p) => personBalance(p, S.periodOffset)).join('')}</div>` : pocketsCard(who, period.tx)}
     <div class="card">
       <div class="row"><span class="grow small muted">${inc > 0 ? `${whose === 'Your' ? 'You have' : whose === 'Both of you' ? 'Together you have' : `${esc(who)} has`} spent ${Math.round((exp / inc) * 100)}% of income` : 'Add income for this period to see the balance'}</span></div>
       <div class="meter ${exp > inc && inc > 0 ? 'over' : ''}"><div style="width:${pct}%"></div></div>
@@ -1404,7 +1486,7 @@ function personBalance(p, offset = 0) {
   </div>`;
 }
 
-ACTIONS.moneyWho = (p) => { S.moneyWho = p === S.me ? 'me' : p; store.set('moneyWho', S.moneyWho); render(); };
+ACTIONS.moneyWho = (p) => { S.moneyWho = p === S.me ? 'me' : p; S.pocket = null; store.set('moneyWho', S.moneyWho); render(); };
 ACTIONS.openMoney = (p) => {
   S.tab = 'money'; store.set('tab', 'money');
   S.periodOffset = 0;
@@ -1421,7 +1503,7 @@ ACTIONS.copyIncome = async () => {
     const r = periodOf(personOf(t));
     const date = inRange(today(), r) ? today() : r.start;
     save('transactions', null, {
-      type: 'income', amount: t.amount, month: date.slice(0, 7), category: t.category, description: t.description, person: personOf(t), date,
+      type: 'income', amount: t.amount, month: date.slice(0, 7), category: t.category, description: t.description, person: personOf(t), pocket: pocketOf(t), date,
     });
   }
   toast(`Copied ${prev.length} income item${prev.length === 1 ? '' : 's'}`);
@@ -1439,6 +1521,9 @@ function txForm(t, type) {
       { name: 'type', type: 'segment', label: 'Type', value: type, options: [{ value: 'expense', label: 'Spending' }, { value: 'income', label: 'Income' }] },
       { name: 'person', type: 'segment', label: 'Whose', value: t ? personOf(t) : (moneyWho() === 'all' ? S.me : moneyWho()),
         options: people().map((p) => ({ value: p, label: p === S.me ? `Mine (${p})` : `${p}'s` })) },
+      { name: 'pocket', type: 'segment', label: 'Pocket', showLabel: true, wrap: true,
+        value: t ? pocketOf(t) : (S.pocket || MAIN_POCKET),
+        options: pocketSegment(t ? personOf(t) : (moneyWho() === 'all' ? S.me : moneyWho())) },
       { name: 'amount', label: `Amount (${S.db.settings.currency})`, type: 'number', step: '0.01', min: 0, required: true, value: t?.amount },
       { name: 'description', label: 'Description', value: t?.description, placeholder: type === 'income' ? 'e.g. My salary' : 'e.g. Electricity bill' },
       { name: 'category', label: 'Category', type: 'select', options: t?.category && !cats.includes(t.category) ? [...cats, t.category] : cats, value: t?.category || cats[0] },
@@ -1454,8 +1539,17 @@ function txForm(t, type) {
     },
     onDelete: t ? () => remove('transactions', t.id, 'Deleted') : null,
   });
-  // Swap category options when switching between spending and income.
   const modal = $('#modal');
+  // Whose → show that person's pockets (back to Main).
+  const pocketLabel = () => $('.field-label', modal);
+  const setPocketWord = (type) => { if (pocketLabel()) pocketLabel().textContent = type === 'income' ? 'Into pocket' : 'From pocket'; };
+  setPocketWord(type);
+  modal.querySelectorAll('input[name=person]').forEach((r) => r.addEventListener('change', () => {
+    $('[data-seg=pocket]', modal).innerHTML = pocketsOf(r.value).map((k) =>
+      `<label><input type="radio" name="pocket" value="${esc(k)}" ${k === MAIN_POCKET ? 'checked' : ''}>${esc(k)}</label>`).join('');
+  }));
+  modal.querySelectorAll('input[name=type]').forEach((r) => r.addEventListener('change', () => setPocketWord(r.value)));
+  // Swap category options when switching between spending and income.
   modal.querySelectorAll('input[name=type]').forEach((r) => r.addEventListener('change', () => {
     const list = r.value === 'income' ? INCOME_CATS : EXPENSE_CATS;
     $('select[name=category]', modal).innerHTML = list.map((c) => `<option>${esc(c)}</option>`).join('');
