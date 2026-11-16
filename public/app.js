@@ -1382,6 +1382,8 @@ function periodTotals(who, offset = S.periodOffset) {
 // Each person splits their money into pockets (Main is always there and is the default).
 // Income goes into a pocket and spending comes out of one.
 const MAIN_POCKET = 'Main';
+// Spending from these pockets gets this category automatically (keys are lower-case pocket names).
+const POCKET_CATEGORY = { meal: 'Food & Drinks' };
 const pocketOf = (t) => t.pocket || MAIN_POCKET;
 function pocketsOf(p, includeUsed = true) {
   const list = [MAIN_POCKET, ...(S.db.settings.pockets?.[p] || []).filter((x) => x && x !== MAIN_POCKET)];
@@ -1607,6 +1609,14 @@ function txForm(t, type) {
     $('select[name=category]', modal).innerHTML = list.map((c) => `<option>${esc(c)}</option>`).join('');
     $('h3', modal).textContent = `${t ? 'Edit' : 'Add'} ${r.value === 'income' ? 'income' : 'spending'}`;
   }));
+  // Picking certain pockets for spending sets the matching category (still changeable by hand).
+  const autoCategory = () => {
+    const kind = $('input[name=type]:checked', modal)?.value;
+    const cat = POCKET_CATEGORY[($('input[name=pocket]:checked', modal)?.value || '').toLowerCase()];
+    if (kind === 'expense' && cat) $('select[name=category]', modal).value = cat;
+  };
+  $('form', modal).addEventListener('change', (e) => { if (e.target.name === 'pocket' || e.target.name === 'type') autoCategory(); });
+  if (!t) autoCategory();
 }
 ACTIONS.addTx = (type) => txForm(null, type);
 ACTIONS.editTx = (id) => txForm(S.db.transactions.find((x) => x.id === id));
