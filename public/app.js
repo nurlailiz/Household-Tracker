@@ -140,7 +140,7 @@ const SCHEMA = {
   weights: { catId: 'str!', date: 'str!', kg: 'num!', notes: 'str' },
   feedings: { catId: 'str!', time: 'str!', food: 'str', amount: 'str', notes: 'str' },
   events: { catId: 'str!', type: 'str!', date: 'str!', nextDue: 'str', notes: 'str' },
-  transactions: { type: 'str!', amount: 'num!', month: 'str!', date: 'str', category: 'str', description: 'str', person: 'str', pocket: 'str' },
+  transactions: { type: 'str!', amount: 'num!', month: 'str!', date: 'str', category: 'str', description: 'str', location: 'str', person: 'str', pocket: 'str' },
   groceries: { name: 'str!', quantity: 'str', note: 'str', addedDate: 'str!', bought: 'bool', boughtDate: 'str', boughtBy: 'str', expiry: 'str' },
 };
 const COLLECTIONS = Object.keys(SCHEMA);
@@ -1437,7 +1437,7 @@ function renderMoney() {
   const txItem = (t) => `<li class="clickable" data-action="editTx" data-id="${t.id}">
     ${who === 'all' ? personDot(personOf(t)) : ''}
     <div class="grow"><div class="title">${esc(t.description || t.category || (t.type === 'income' ? 'Income' : 'Expense'))}</div>
-    <div class="meta">${[who === 'all' ? personOf(t) : '', t.description ? t.category : '', fmtShort(t.date),
+    <div class="meta">${[who === 'all' ? personOf(t) : '', t.description ? t.category : '', t.location ? `at ${t.location}` : '', fmtShort(t.date),
       showPocket(t) ? `${t.type === 'income' ? 'into' : 'from'} ${pocketOf(t)}` : ''].filter(Boolean).map(esc).join(' · ')}</div>
     </div>
     <span class="amount ${t.type}">${t.type === 'income' ? '+' : '−'}${money(t.amount)}</span></li>`;
@@ -1538,7 +1538,9 @@ function txForm(t, type) {
         value: t ? pocketOf(t) : (S.pocket || MAIN_POCKET),
         options: pocketSegment(t ? personOf(t) : (moneyWho() === 'all' ? S.me : moneyWho())) },
       { name: 'amount', label: `Amount (${S.db.settings.currency})`, type: 'number', step: '0.01', min: 0, required: true, value: t?.amount },
-      { name: 'description', label: 'Description', value: t?.description, placeholder: type === 'income' ? 'e.g. My salary' : 'e.g. Electricity bill' },
+      { name: 'description', label: 'Description (optional)', value: t?.description, placeholder: type === 'income' ? 'e.g. My salary' : 'e.g. Electricity bill' },
+      { name: 'location', label: 'Location (optional)', value: t?.location, placeholder: 'e.g. Aeon Shah Alam',
+        suggestions: [...new Set(S.db.transactions.map((x) => x.location).filter(Boolean))].sort() },
       { name: 'category', label: 'Category', type: 'select', options: t?.category && !cats.includes(t.category) ? [...cats, t.category] : cats, value: t?.category || cats[0] },
       { name: 'date', label: 'Date', type: 'date', value: t?.date || defaultDate },
     ],
