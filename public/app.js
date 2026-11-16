@@ -1312,7 +1312,7 @@ ACTIONS.editEvent = (id) => eventForm(S.db.events.find((x) => x.id === id));
 // Money
 // ============================================================
 const EXPENSE_CATS = ['Groceries', 'Rent / Mortgage', 'Utilities', 'Transport & Parking', 'Food & Drinks', 'Pets', 'Health', 'Shopping',
-  'Entertainment', 'Bills & subscriptions', 'Debt', 'Savings', 'Gifts', 'Other'];
+  'Entertainment', 'Bills & subscriptions', 'Commitment', 'Debt', 'Savings', 'Gifts', 'Other'];
 const INCOME_CATS = ['Salary', 'Nafkah', 'Bonus', 'Side income', 'General Claims', 'Overtime Claims', 'Other'];
 
 // Renamed spending categories: older entries are moved to the new names once (when the app loads).
@@ -1502,11 +1502,15 @@ function renderMoney() {
 }
 
 // Spending grouped by day, newest day first.
-function dayLabel(d) {
-  const n = daysUntil(d);
-  if (n === 0) return 'Today';
-  if (n === -1) return 'Yesterday';
-  return parseDate(d).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: d.slice(0, 4) === today().slice(0, 4) ? undefined : 'numeric' });
+// Calendar-style date block on the left of each day's spending: "16 · TODAY · NOV", "10 · TUE · NOV".
+function dayBlock(d) {
+  const date = parseDate(d);
+  const isToday = daysUntil(d) === 0;
+  const weekday = isToday ? 'Today' : date.toLocaleDateString(undefined, { weekday: 'short' });
+  const month = date.toLocaleDateString(undefined, { month: 'short', year: d.slice(0, 4) === today().slice(0, 4) ? undefined : '2-digit' });
+  const full = date.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  return `<h3 class="cal-date ${isToday ? 'today' : ''}" aria-label="${esc(full)}">
+    <b aria-hidden="true">${date.getDate()}</b><span aria-hidden="true">${esc(weekday)}</span><small aria-hidden="true">${esc(month)}</small></h3>`;
 }
 function spendingByDay(expenses, txItem) {
   const days = new Map();
@@ -1515,8 +1519,8 @@ function spendingByDay(expenses, txItem) {
     if (!days.has(d)) days.set(d, []);
     days.get(d).push(t);
   }
-  return [...days.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([d, list]) => `<section class="day-group">
-    <h3 class="day-head">${dayLabel(d)}</h3>
+  return [...days.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([d, list]) => `<section class="day-group cal">
+    ${dayBlock(d)}
     <ul class="list">${list.map((t) => txItem(t, false)).join('')}</ul></section>`).join('');
 }
 

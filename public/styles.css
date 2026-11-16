@@ -430,3 +430,19 @@ dialog form { overflow-x: hidden; }
 .filter-chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
 .filter-chip[aria-pressed="true"] .count { color: rgba(255, 255, 255, .85); }
 @media (prefers-color-scheme: dark) { .filter-chip[aria-pressed="true"] { color: #0f1a17; } .filter-chip[aria-pressed="true"] .count { color: rgba(15, 26, 23, .8); } }
+
+/* ---------- Spending: calendar-style date blocks (V2.8) ---------- */
+.day-group.cal { display: flex; gap: 12px; align-items: flex-start; padding: 6px 0; border-top: 1px solid var(--border); }
+.day-group.cal:first-of-type { border-top: 0; }
+.day-group.cal + .day-group.cal { margin-top: 0; }
+.cal-date {
+  width: 46px; flex-shrink: 0; margin: 0; padding-top: 8px; text-align: center;
+  display: flex; flex-direction: column; align-items: center; line-height: 1.1;
+}
+.cal-date b { font-size: 1.5rem; font-weight: 800; color: var(--text); }
+.cal-date span { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-top: 3px; }
+.cal-date small { font-size: .68rem; font-weight: 600; text-transform: uppercase; color: var(--muted); margin-top: 1px; }
+.cal-date.today b, .cal-date.today span { color: var(--accent); }
+.day-group.cal .list { flex: 1; min-width: 0; }
+.day-group.cal .list > li { padding-left: 0; }
+.day-group.cal .title { overflow-wrap: anywhere; }
