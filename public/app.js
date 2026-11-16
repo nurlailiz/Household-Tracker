@@ -1312,8 +1312,8 @@ ACTIONS.editEvent = (id) => eventForm(S.db.events.find((x) => x.id === id));
 // Money
 // ============================================================
 const EXPENSE_CATS = ['Groceries', 'Rent / Mortgage', 'Utilities', 'Transport', 'Dining out', 'Pets', 'Health', 'Shopping',
-  'Entertainment', 'Bills & subscriptions', 'Savings', 'Gifts', 'Other'];
-const INCOME_CATS = ['Salary', 'Bonus', 'Side income', 'Refund', 'Other'];
+  'Entertainment', 'Bills & subscriptions', 'Debt', 'Savings', 'Gifts', 'Other'];
+const INCOME_CATS = ['Salary', 'Nafkah', 'Bonus', 'Side income', 'Refund', 'Other'];
 
 // The two of you: whoever has signed in, plus anyone who owns an entry. You come first.
 function people() {
@@ -1426,7 +1426,7 @@ function renderMoney() {
     <div class="grow"><div class="title">${esc(t.description || t.category || (t.type === 'income' ? 'Income' : 'Expense'))}</div>
     <div class="meta">${[who === 'all' ? personOf(t) : '', t.description ? t.category : '', fmtShort(t.date),
       showPocket(t) ? `${t.type === 'income' ? 'into' : 'from'} ${pocketOf(t)}` : ''].filter(Boolean).map(esc).join(' · ')}</div>
-    <div class="meta">${byline(t)}</div></div>
+    </div>
     <span class="amount ${t.type}">${t.type === 'income' ? '+' : '−'}${money(t.amount)}</span></li>`;
 
   const prevIncome = periodTotals(who, S.periodOffset - 1).tx.filter((t) => t.type === 'income');
