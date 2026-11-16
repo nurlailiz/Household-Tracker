@@ -390,3 +390,9 @@ dialog form { overflow-x: hidden; }
 .modal-actions .btn.danger { order: 3; flex: 1 1 100%; min-height: 44px; font-weight: 600; background: none; }
 .btn { transition: transform .1s ease, filter .1s ease; }
 .btn:active:not(:disabled) { transform: scale(.97); }
+
+/* ---------- Budget period heading ---------- */
+.period-title { text-align: center; min-width: 0; }
+.period-title h2 { margin: 0; font-size: 1.1rem; }
+.period-title p { margin: 2px 0 0; font-size: .8rem; color: var(--muted); }
+.center { text-align: center; }

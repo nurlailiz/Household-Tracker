@@ -130,7 +130,7 @@ const S = {
   tab: store.get('tab', 'home'),
   moneyWho: store.get('moneyWho', 'me'),
   catId: store.get('catId', null),
-  month: thisMonth(),
+  periodOffset: 0, // Money: 0 = current budget period, -1 = the one before, …
 };
 
 // Field types per collection: used to clean form values before saving.
@@ -524,6 +524,7 @@ const MENU_ICONS = {
   household: '<path d="M3 11l9-7 9 7"></path><path d="M5 10v10h14V10"></path><path d="M10 20v-5h4v5"></path>',
   currency: '<circle cx="12" cy="12" r="8.5"></circle><path d="M14.5 9.2c-.5-.8-1.5-1.2-2.5-1.2-1.4 0-2.5.8-2.5 2s1.1 1.7 2.5 2 2.5.8 2.5 2-1.1 2-2.5 2c-1 0-2-.4-2.5-1.2M12 6.5v1.5M12 16v1.5"></path>',
   activity: '<circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5V12l3 2"></path>',
+  period: '<rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M4 10h16M9 3v4M15 3v4"></path><path d="M8.5 14.5h3"></path>',
   refresh: '<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"></path><path d="M4 4v4h4"></path><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"></path><path d="M20 20v-4h-4"></path>',
   import: '<path d="M12 4v11"></path><path d="M7.5 10.5 12 15l4.5-4.5"></path><path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2"></path>',
   signout: '<path d="M14 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4"></path><path d="M10 16l-4-4 4-4"></path><path d="M6 12h10"></path>',
@@ -558,6 +559,7 @@ function menuHtml() {
   return `<div class="menu" role="menu" aria-label="Settings">
     ${item('openHousehold', 'household', 'Household', esc(people().map((p) => roleOf(p) ? `${p} (${roleOf(p)})` : p).join(' · ')))}
     ${item('openCurrency', 'currency', 'Currency', esc(S.db.settings.currency))}
+    ${item('openPeriod', 'period', 'Budget period', esc(periodStartDay(S.me) > 1 ? `Yours starts on the ${ordinal(periodStartDay(S.me))}` : 'Yours: calendar month'))}
     ${item('activity', 'activity', 'Recent activity')}
     <button role="menuitem" class="menu-item ${refresh.fresh ? 'fresh' : ''}" data-action="forceRefresh" ${refresh.disabled ? 'disabled aria-disabled="true"' : ''}>
       ${menuIcon('refresh')}<span class="grow"><span class="menu-label">${refresh.label}</span><span class="menu-hint">${refresh.hint}</span></span></button>
@@ -598,6 +600,25 @@ ACTIONS.openCurrency = fromMenu(() => openForm({
   fields: [{ name: 'currency', label: 'Currency symbol', value: S.db.settings.currency, required: true, placeholder: 'e.g. RM, $, £, €' }],
   onSubmit: (v) => saveSettings({ currency: v.currency.trim().slice(0, 6) || '$' }, 'Currency saved'),
 }));
+
+ACTIONS.openPeriod = fromMenu(() => {
+  const mine = periodStartDay(S.me);
+  const others = people().filter((p) => p !== S.me);
+  const preview = (d) => `Your current period: <strong>${fmtRange(periodRange(d, currentPeriodKey(d)))}</strong>`;
+  openForm({
+    title: 'Budget period',
+    meta: `<p class="small muted" style="margin:-6px 0 14px">Pick the day your budget month starts, e.g. the day your salary comes in. Each of you sets your own; Money and Home use it.</p>
+      ${others.map((p) => `<p class="small" style="margin:0 0 12px">${personDot(p)} <strong>${esc(p)}</strong>: ${periodStartDay(p) > 1 ? `starts on the ${ordinal(periodStartDay(p))}` : 'calendar month'} <span class="muted">· ${fmtRange(periodOf(p, 0))} · only ${esc(p)} can change this</span></p>`).join('')}`,
+    fields: [{
+      name: 'periodDay', label: `Your budget month starts on (${S.me})`, type: 'select', value: String(mine),
+      options: Array.from({ length: 31 }, (_, i) => ({ value: String(i + 1), label: i === 0 ? '1st (calendar month)' : `${ordinal(i + 1)} of the month` })),
+    }],
+    footer: `<p class="small" id="periodPreview" style="margin:-4px 0 8px">${preview(mine)}</p>`,
+    // Only your own entry changes; your partner's stays as they set it.
+    onSubmit: (v) => saveSettings({ periodStart: { ...(S.db.settings.periodStart || {}), [S.me]: Number(v.periodDay) || 1 } }, 'Budget period saved'),
+  });
+  $('#f_periodDay').addEventListener('change', (e) => { $('#periodPreview').innerHTML = preview(Number(e.target.value)); });
+});
 
 ACTIONS.signOut = fromMenu(() => signOut(auth));
 
@@ -736,8 +757,8 @@ function renderHome() {
   </div>`;
 
   const moneyCard = `<div class="card">
-    <div class="section-head"><h2>💰 ${fmtMonth(thisMonth())}</h2>${more('money')}</div>
-    ${people().map((p) => personBalance(p, thisMonth())).join('')}
+    <div class="section-head"><h2>💰 This budget period</h2>${more('money')}</div>
+    ${people().map((p) => personBalance(p, 0)).join('')}
   </div>`;
 
   const expiringCard = expiring.length ? `<div class="card alert">
@@ -1272,16 +1293,44 @@ function moneyWho() {
   return S.moneyWho;
 }
 
-function monthTotals(month, who) {
-  const tx = S.db.transactions.filter((t) => t.month === month && (who === 'all' || personOf(t) === who));
+// ---------- Budget periods ----------
+// Each person picks the day their budget month starts (1 = calendar month). A period is named by the
+// month it ends in: starting on the 25th, "November" runs 25 Oct – 24 Nov. Days 29–31 fall back to
+// the last day of shorter months.
+const daysIn = (key) => { const [y, m] = key.split('-').map(Number); return new Date(y, m, 0).getDate(); };
+const dayIn = (key, d) => `${key}-${pad(Math.min(d, daysIn(key)))}`;
+const addDays = (iso, n) => { const x = parseDate(iso); x.setDate(x.getDate() + n); return toISO(x); };
+const periodStartDay = (p) => Math.min(31, Math.max(1, Number(S.db?.settings?.periodStart?.[p]) || 1));
+function periodRange(day, key) {
+  if (day <= 1) return { start: `${key}-01`, end: dayIn(key, 31), key, day };
+  return { start: dayIn(shiftMonth(key, -1), day), end: addDays(dayIn(key, day), -1), key, day };
+}
+function currentPeriodKey(day) {
+  const m = thisMonth();
+  if (day <= 1) return m;
+  return today() >= dayIn(m, day) ? shiftMonth(m, 1) : m;
+}
+const periodOf = (p, offset = S.periodOffset) => {
+  const day = periodStartDay(p);
+  return periodRange(day, shiftMonth(currentPeriodKey(day), offset));
+};
+const fmtRange = (r) => `${fmtShort(r.start)} – ${fmtDate(r.end)}`;
+const txDate = (t) => t.date || `${t.month}-01`;
+const inRange = (d, r) => d >= r.start && d <= r.end;
+
+// Totals for one person (their own period) or 'all' (each person in their own period).
+function periodTotals(who, offset = S.periodOffset) {
+  const ps = who === 'all' ? people() : [who];
+  const ranges = Object.fromEntries(ps.map((p) => [p, periodOf(p, offset)]));
+  const tx = S.db.transactions.filter((t) => ranges[personOf(t)] && inRange(txDate(t), ranges[personOf(t)]));
   const sum = (type) => tx.filter((t) => t.type === type).reduce((n, t) => n + t.amount, 0);
   const inc = sum('income'), exp = sum('expense');
-  return { tx, inc, exp, left: inc - exp };
+  return { tx, inc, exp, left: inc - exp, ranges };
 }
 
 function renderMoney() {
   const who = moneyWho();
-  const { tx, inc, exp, left } = monthTotals(S.month, who);
+  const { tx, inc, exp, left, ranges } = periodTotals(who);
   const byDate = (a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt || '').localeCompare(a.createdAt || '');
   const income = tx.filter((t) => t.type === 'income').sort(byDate);
   const expenses = tx.filter((t) => t.type === 'expense').sort(byDate);
@@ -1299,7 +1348,13 @@ function renderMoney() {
     <div class="meta">${byline(t)}</div></div>
     <span class="amount ${t.type}">${t.type === 'income' ? '+' : '−'}${money(t.amount)}</span></li>`;
 
-  const prevIncome = S.db.transactions.filter((t) => t.month === shiftMonth(S.month, -1) && t.type === 'income' && (who === 'all' || personOf(t) === who));
+  const prevIncome = periodTotals(who, S.periodOffset - 1).tx.filter((t) => t.type === 'income');
+  // Heading: the exact dates for one person; for Both, the month name (each of you in your own period).
+  const range = who === 'all' ? null : ranges[who];
+  const heading = range ? fmtRange(range) : fmtMonth(periodOf(S.me).key);
+  const subheading = range
+    ? (range.day > 1 ? `Budget month starts on the ${ordinal(range.day)}` : 'Calendar month')
+    : 'Each of you in your own budget period';
   const tabs = [...people(), 'all'];
   const whose = who === 'all' ? 'Both of you' : who === S.me ? 'Your' : `${who}'s`;
 
@@ -1307,28 +1362,28 @@ function renderMoney() {
     <div class="seg money-tabs" role="tablist">${tabs.map((p) => `<button role="tab" data-action="moneyWho" data-id="${esc(p)}"
       aria-selected="${p === who}">${p === 'all' ? '👫 Both' : `${personDot(p)}${esc(whoLabel(p))}`}</button>`).join('')}</div>
     <div class="month-nav">
-      <button class="btn icon" data-action="month" data-id="-1" aria-label="Previous month">‹</button>
-      <h2>${fmtMonth(S.month)}</h2>
-      <button class="btn icon" data-action="month" data-id="1" aria-label="Next month">›</button>
-      ${S.month !== thisMonth() ? `<button class="btn ghost small" data-action="month" data-id="0">Today</button>` : ''}
+      <button class="btn icon" data-action="month" data-id="-1" aria-label="Previous period">‹</button>
+      <div class="period-title"><h2>${heading}</h2><p>${subheading}</p></div>
+      <button class="btn icon" data-action="month" data-id="1" aria-label="Next period">›</button>
     </div>
+    ${S.periodOffset !== 0 ? `<p class="center" style="margin:-6px 0 12px"><button class="btn ghost small" data-action="month" data-id="0">Back to current period</button></p>` : ''}
     <div class="stats">
       <div class="stat"><span>Income</span><strong class="amount income">${money(inc)}</strong></div>
       <div class="stat"><span>Spent</span><strong class="amount expense">${money(exp)}</strong></div>
       <div class="stat"><span>${left < 0 ? 'Over by' : 'Left'}</span><strong class="amount" style="color:${left < 0 ? 'var(--danger)' : 'inherit'}">${money(Math.abs(left))}</strong></div>
     </div>
-    ${who === 'all' ? `<div class="card"><div class="section-head"><h2>Each of you</h2></div>${people().map((p) => personBalance(p, S.month)).join('')}</div>` : ''}
+    ${who === 'all' ? `<div class="card"><div class="section-head"><h2>Each of you</h2></div>${people().map((p) => personBalance(p, S.periodOffset)).join('')}</div>` : ''}
     <div class="card">
-      <div class="row"><span class="grow small muted">${inc > 0 ? `${whose === 'Your' ? 'You have' : whose === 'Both of you' ? 'Together you have' : `${esc(who)} has`} spent ${Math.round((exp / inc) * 100)}% of income` : 'Add this month\'s income to see the balance'}</span></div>
+      <div class="row"><span class="grow small muted">${inc > 0 ? `${whose === 'Your' ? 'You have' : whose === 'Both of you' ? 'Together you have' : `${esc(who)} has`} spent ${Math.round((exp / inc) * 100)}% of income` : 'Add income for this period to see the balance'}</span></div>
       <div class="meter ${exp > inc && inc > 0 ? 'over' : ''}"><div style="width:${pct}%"></div></div>
       ${!tx.some((t) => t.type === 'income') && prevIncome.length
-        ? `<div class="row wrap" style="margin-top:12px"><button class="btn" data-action="copyIncome">Copy last month's income</button></div>` : ''}
+        ? `<div class="row wrap" style="margin-top:12px"><button class="btn" data-action="copyIncome">Copy last period's income</button></div>` : ''}
     </div>
     ${catRows.length ? `<div class="card"><div class="section-head"><h2>Where it went</h2></div><div class="bars">
       ${catRows.map(([c, v]) => `<div class="bar-row"><span>${esc(c)}</span><div class="meter"><div style="width:${(v / maxCat) * 100}%"></div></div>
         <span class="amount">${money(v)}</span></div>`).join('')}</div></div>` : ''}
     <div class="card"><div class="section-head"><h2>Income<small>${income.length}</small></h2></div>
-      ${income.length ? `<ul class="list">${income.map(txItem).join('')}</ul>` : '<p class="empty">No income added for this month.</p>'}</div>
+      ${income.length ? `<ul class="list">${income.map(txItem).join('')}</ul>` : '<p class="empty">No income added for this period.</p>'}</div>
     <div class="card"><div class="section-head"><h2>Spending<small>${expenses.length}</small></h2></div>
       ${expenses.length ? `<ul class="list">${expenses.map(txItem).join('')}</ul>` : '<p class="empty">No spending recorded yet. Tap ＋ to add.</p>'}</div>
     <div class="fab-space" aria-hidden="true"></div>
@@ -1337,35 +1392,36 @@ function renderMoney() {
     </button>`;
 }
 
-// One person's month at a glance (used on Home and in the Both tab).
-function personBalance(p, month) {
-  const { inc, exp, left } = monthTotals(month, p);
+// One person's budget period at a glance (used on Home and in the Both tab).
+function personBalance(p, offset = 0) {
+  const { inc, exp, left, ranges } = periodTotals(p, offset);
   const pct = inc > 0 ? Math.min(100, (exp / inc) * 100) : (exp > 0 ? 100 : 0);
   return `<div class="balance clickable" role="button" tabindex="0" data-action="openMoney" data-id="${esc(p)}">
     <div class="row">${personDot(p)}<strong>${esc(p === S.me ? `${p} (you)` : p)}</strong><span class="grow">${roleBadge(p)}</span>
       <span class="amount" style="color:${left < 0 ? 'var(--danger)' : 'inherit'}">${left < 0 ? 'Over ' : ''}${money(Math.abs(left))}${left < 0 ? '' : ' left'}</span></div>
     <div class="meter ${exp > inc && inc > 0 ? 'over' : ''}"><div style="width:${pct}%"></div></div>
-    <div class="meta">Income ${money(inc)} · Spent ${money(exp)}</div>
+    <div class="meta">${fmtRange(ranges[p])} · Income ${money(inc)} · Spent ${money(exp)}</div>
   </div>`;
 }
 
 ACTIONS.moneyWho = (p) => { S.moneyWho = p === S.me ? 'me' : p; store.set('moneyWho', S.moneyWho); render(); };
 ACTIONS.openMoney = (p) => {
   S.tab = 'money'; store.set('tab', 'money');
-  S.month = thisMonth();
+  S.periodOffset = 0;
   ACTIONS.moneyWho(p);
   window.scrollTo(0, 0);
 };
 
-ACTIONS.month = (n) => { S.month = Number(n) === 0 ? thisMonth() : shiftMonth(S.month, Number(n)); render(); };
+ACTIONS.month = (n) => { S.periodOffset = Number(n) === 0 ? 0 : S.periodOffset + Number(n); render(); };
 
 ACTIONS.copyIncome = async () => {
   const who = moneyWho();
-  const prev = S.db.transactions.filter((t) => t.month === shiftMonth(S.month, -1) && t.type === 'income' && (who === 'all' || personOf(t) === who));
+  const prev = periodTotals(who, S.periodOffset - 1).tx.filter((t) => t.type === 'income');
   for (const t of prev) {
+    const r = periodOf(personOf(t));
+    const date = inRange(today(), r) ? today() : r.start;
     save('transactions', null, {
-      type: 'income', amount: t.amount, month: S.month, category: t.category, description: t.description, person: personOf(t),
-      date: S.month === thisMonth() ? today() : S.month + '-01',
+      type: 'income', amount: t.amount, month: date.slice(0, 7), category: t.category, description: t.description, person: personOf(t), date,
     });
   }
   toast(`Copied ${prev.length} income item${prev.length === 1 ? '' : 's'}`);
@@ -1373,7 +1429,8 @@ ACTIONS.copyIncome = async () => {
 
 function txForm(t, type) {
   type = t?.type || type;
-  const defaultDate = S.month === thisMonth() ? today() : S.month + '-01';
+  const viewRange = periodOf(moneyWho() === 'all' ? S.me : moneyWho());
+  const defaultDate = inRange(today(), viewRange) ? today() : viewRange.start;
   const cats = type === 'income' ? INCOME_CATS : EXPENSE_CATS;
   openForm({
     title: `${t ? 'Edit' : 'Add'} ${type === 'income' ? 'income' : 'spending'}`,
@@ -1388,9 +1445,10 @@ function txForm(t, type) {
       { name: 'date', label: 'Date', type: 'date', value: t?.date || defaultDate },
     ],
     onSubmit: (v) => {
-      v.month = v.date ? v.date.slice(0, 7) : (t?.month || S.month);
+      v.date = v.date || defaultDate;
+      v.month = v.date.slice(0, 7);
       const who = moneyWho();
-      const msg = v.month !== S.month ? `Saved to ${fmtMonth(v.month)}`
+      const msg = !inRange(v.date, periodOf(v.person || S.me)) ? 'Saved to a different budget period'
         : who !== 'all' && v.person && v.person !== who ? `Saved to ${v.person === S.me ? 'your' : `${v.person}'s`} tab` : 'Saved';
       return t ? save('transactions', t.id, v, msg) : save('transactions', null, v, msg);
     },
