@@ -1434,10 +1434,10 @@ function renderMoney() {
   const catRows = Object.entries(cats).sort((a, b) => b[1] - a[1]);
   const maxCat = catRows[0]?.[1] || 1;
 
-  const txItem = (t) => `<li class="clickable" data-action="editTx" data-id="${t.id}">
+  const txItem = (t, showDate = true) => `<li class="clickable" data-action="editTx" data-id="${t.id}">
     ${who === 'all' ? personDot(personOf(t)) : ''}
     <div class="grow"><div class="title">${esc(t.description || t.category || (t.type === 'income' ? 'Income' : 'Expense'))}</div>
-    <div class="meta">${[who === 'all' ? personOf(t) : '', t.description ? t.category : '', t.location ? `at ${t.location}` : '', fmtShort(t.date),
+    <div class="meta">${[who === 'all' ? personOf(t) : '', t.description ? t.category : '', t.location ? `at ${t.location}` : '', showDate ? fmtShort(t.date) : '',
       showPocket(t) ? `${t.type === 'income' ? 'into' : 'from'} ${pocketOf(t)}` : ''].filter(Boolean).map(esc).join(' · ')}</div>
     </div>
     <span class="amount ${t.type}">${t.type === 'income' ? '+' : '−'}${money(t.amount)}</span></li>`;
@@ -1478,13 +1478,32 @@ function renderMoney() {
       ${catRows.map(([c, v]) => `<div class="bar-row"><span>${esc(c)}</span><div class="meter"><div style="width:${(v / maxCat) * 100}%"></div></div>
         <span class="amount">${money(v)}</span></div>`).join('')}</div></div>` : ''}
     <div class="card"><div class="section-head"><h2>Income<small>${income.length}</small></h2></div>
-      ${income.length ? `<ul class="list">${income.map(txItem).join('')}</ul>` : '<p class="empty">No income added for this period.</p>'}</div>
+      ${income.length ? `<ul class="list">${income.map((t) => txItem(t)).join('')}</ul>` : '<p class="empty">No income added for this period.</p>'}</div>
     <div class="card"><div class="section-head"><h2>Spending<small>${expenses.length}</small></h2></div>
-      ${expenses.length ? `<ul class="list">${expenses.map(txItem).join('')}</ul>` : '<p class="empty">No spending recorded yet. Tap ＋ to add.</p>'}</div>
+      ${expenses.length ? spendingByDay(expenses, txItem) : '<p class="empty">No spending recorded yet. Tap ＋ to add.</p>'}</div>
     <div class="fab-space" aria-hidden="true"></div>
     <button class="fab" data-action="addTx" data-id="expense" aria-label="Add spending or income">
       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
     </button>`;
+}
+
+// Spending grouped by day, newest day first, with each day's total.
+function dayLabel(d) {
+  const n = daysUntil(d);
+  if (n === 0) return 'Today';
+  if (n === -1) return 'Yesterday';
+  return parseDate(d).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: d.slice(0, 4) === today().slice(0, 4) ? undefined : 'numeric' });
+}
+function spendingByDay(expenses, txItem) {
+  const days = new Map();
+  for (const t of expenses) {
+    const d = txDate(t);
+    if (!days.has(d)) days.set(d, []);
+    days.get(d).push(t);
+  }
+  return [...days.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([d, list]) => `<section class="day-group">
+    <h3 class="day-head"><span>${dayLabel(d)}</span><span class="amount expense">−${money(list.reduce((n, t) => n + t.amount, 0))}</span></h3>
+    <ul class="list">${list.map((t) => txItem(t, false)).join('')}</ul></section>`).join('');
 }
 
 // One person's budget period at a glance (used on Home and in the Both tab).

@@ -409,3 +409,12 @@ dialog form { overflow-x: hidden; }
 .field-label { font-size: .85rem; color: var(--muted); margin-bottom: 4px; }
 .seg.wrap { flex-wrap: wrap; }
 .seg.wrap label { flex: 1 1 auto; min-width: 72px; }
+
+/* ---------- Spending grouped by day ---------- */
+.day-group + .day-group { margin-top: 10px; }
+.day-head {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 0 0 2px; padding: 8px 4px 6px;
+  font-size: .82rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em;
+  border-bottom: 1px solid var(--border);
+}
+.day-head .amount { font-size: .85rem; text-transform: none; letter-spacing: 0; }
