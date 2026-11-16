@@ -418,3 +418,15 @@ dialog form { overflow-x: hidden; }
   border-bottom: 1px solid var(--border);
 }
 .day-head .amount { font-size: .85rem; text-transform: none; letter-spacing: 0; }
+
+/* ---------- Spending: filter by pocket ---------- */
+.chip-filter { display: flex; gap: 6px; overflow-x: auto; padding: 0 0 10px; margin: -2px 0 4px; scrollbar-width: none; }
+.filter-chip {
+  flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 14px;
+  border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  font-size: .88rem; font-weight: 600; cursor: pointer;
+}
+.filter-chip .count { font-size: .75rem; font-weight: 700; color: var(--muted); }
+.filter-chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.filter-chip[aria-pressed="true"] .count { color: rgba(255, 255, 255, .85); }
+@media (prefers-color-scheme: dark) { .filter-chip[aria-pressed="true"] { color: #0f1a17; } .filter-chip[aria-pressed="true"] .count { color: rgba(15, 26, 23, .8); } }

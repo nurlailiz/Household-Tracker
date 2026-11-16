@@ -1412,6 +1412,7 @@ function pocketsCard(who, tx) {
 }
 
 ACTIONS.pocketFilter = (name) => { S.pocket = S.pocket === name ? null : name; render(); };
+ACTIONS.spendPocket = (name) => { S.spendPocket = name || null; render(); };
 
 function renderMoney() {
   const who = moneyWho();
@@ -1428,6 +1429,16 @@ function renderMoney() {
   const income = tx.filter((t) => t.type === 'income').sort(byDate);
   const expenses = tx.filter((t) => t.type === 'expense').sort(byDate);
   const pct = inc > 0 ? Math.min(100, (exp / inc) * 100) : (exp > 0 ? 100 : 0);
+
+  // Spending list filter by pocket (only filters the Spending list; the Pockets card filters the whole page).
+  const spendPockets = who === 'all' ? [...new Set(people().flatMap((p) => pocketsOf(p)))] : pocketsOf(who);
+  if (S.spendPocket && (S.pocket || !spendPockets.includes(S.spendPocket))) S.spendPocket = null;
+  const shownSpending = S.spendPocket ? expenses.filter((t) => pocketOf(t) === S.spendPocket) : expenses;
+  const countIn = (k) => expenses.filter((t) => pocketOf(t) === k).length;
+  const spendChips = !S.pocket && spendPockets.length > 1 ? `<div class="chip-filter" role="group" aria-label="Show spending from pocket">
+      <button class="filter-chip" data-action="spendPocket" data-id="" aria-pressed="${!S.spendPocket}">All</button>
+      ${spendPockets.map((k) => `<button class="filter-chip" data-action="spendPocket" data-id="${esc(k)}" aria-pressed="${S.spendPocket === k}">${esc(k)}<span class="count">${countIn(k)}</span></button>`).join('')}
+    </div>` : '';
 
   const cats = {};
   for (const t of expenses) cats[t.category || 'Other'] = (cats[t.category || 'Other'] || 0) + t.amount;
@@ -1479,8 +1490,11 @@ function renderMoney() {
         <span class="amount">${money(v)}</span></div>`).join('')}</div></div>` : ''}
     <div class="card"><div class="section-head"><h2>Income<small>${income.length}</small></h2></div>
       ${income.length ? `<ul class="list">${income.map((t) => txItem(t)).join('')}</ul>` : '<p class="empty">No income added for this period.</p>'}</div>
-    <div class="card"><div class="section-head"><h2>Spending<small>${expenses.length}</small></h2></div>
-      ${expenses.length ? spendingByDay(expenses, txItem) : '<p class="empty">No spending recorded yet. Tap ＋ to add.</p>'}</div>
+    <div class="card"><div class="section-head"><h2>Spending<small>${shownSpending.length}</small></h2></div>
+      ${spendChips}
+      ${shownSpending.length ? spendingByDay(shownSpending, txItem)
+        : expenses.length ? `<p class="empty">No spending from ${esc(S.spendPocket)} in this period.</p>`
+        : '<p class="empty">No spending recorded yet. Tap ＋ to add.</p>'}</div>
     <div class="fab-space" aria-hidden="true"></div>
     <button class="fab" data-action="addTx" data-id="expense" aria-label="Add spending or income">
       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
@@ -1518,7 +1532,7 @@ function personBalance(p, offset = 0) {
   </div>`;
 }
 
-ACTIONS.moneyWho = (p) => { S.moneyWho = p === S.me ? 'me' : p; S.pocket = null; store.set('moneyWho', S.moneyWho); render(); };
+ACTIONS.moneyWho = (p) => { S.moneyWho = p === S.me ? 'me' : p; S.pocket = null; S.spendPocket = null; store.set('moneyWho', S.moneyWho); render(); };
 ACTIONS.openMoney = (p) => {
   S.tab = 'money'; store.set('tab', 'money');
   S.periodOffset = 0;
