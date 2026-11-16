@@ -1487,7 +1487,7 @@ function renderMoney() {
     </button>`;
 }
 
-// Spending grouped by day, newest day first, with each day's total.
+// Spending grouped by day, newest day first.
 function dayLabel(d) {
   const n = daysUntil(d);
   if (n === 0) return 'Today';
@@ -1502,7 +1502,7 @@ function spendingByDay(expenses, txItem) {
     days.get(d).push(t);
   }
   return [...days.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([d, list]) => `<section class="day-group">
-    <h3 class="day-head"><span>${dayLabel(d)}</span><span class="amount expense">−${money(list.reduce((n, t) => n + t.amount, 0))}</span></h3>
+    <h3 class="day-head">${dayLabel(d)}</h3>
     <ul class="list">${list.map((t) => txItem(t, false)).join('')}</ul></section>`).join('');
 }
 
