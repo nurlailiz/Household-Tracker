@@ -224,7 +224,7 @@ function startSync() {
   const ready = (name) => {
     if (!waiting.size) return scheduleRender();
     waiting.delete(name);
-    if (!waiting.size) { render(); tidyCatProfiles(); }
+    if (!waiting.size) { render(); tidyCatProfiles(); tidyCategories(); }
   };
   const onError = (e) => {
     console.error(e);
@@ -1311,9 +1311,22 @@ ACTIONS.editEvent = (id) => eventForm(S.db.events.find((x) => x.id === id));
 // ============================================================
 // Money
 // ============================================================
-const EXPENSE_CATS = ['Groceries', 'Rent / Mortgage', 'Utilities', 'Transport', 'Dining out', 'Pets', 'Health', 'Shopping',
+const EXPENSE_CATS = ['Groceries', 'Rent / Mortgage', 'Utilities', 'Transport & Parking', 'Food & Drinks', 'Pets', 'Health', 'Shopping',
   'Entertainment', 'Bills & subscriptions', 'Debt', 'Savings', 'Gifts', 'Other'];
-const INCOME_CATS = ['Salary', 'Nafkah', 'Bonus', 'Side income', 'Refund', 'Other'];
+const INCOME_CATS = ['Salary', 'Nafkah', 'Bonus', 'Side income', 'General Claims', 'Overtime Claims', 'Other'];
+
+// Renamed spending categories: older entries are moved to the new names once (when the app loads).
+const CATEGORY_RENAMES = { 'Dining out': 'Food & Drinks', Transport: 'Transport & Parking' };
+let categoriesTidied = false;
+function tidyCategories() {
+  if (categoriesTidied) return;
+  categoriesTidied = true;
+  const old = S.db.transactions.filter((t) => t.type === 'expense' && CATEGORY_RENAMES[t.category]);
+  if (!old.length) return;
+  const batch = writeBatch(fdb);
+  for (const t of old) batch.update(doc(fdb, 'transactions', t.id), { category: CATEGORY_RENAMES[t.category] });
+  background(batch.commit());
+}
 
 // The two of you: whoever has signed in, plus anyone who owns an entry. You come first.
 function people() {
