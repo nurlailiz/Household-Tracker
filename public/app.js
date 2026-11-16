@@ -435,7 +435,8 @@ function render() {
   const body = { home: renderHome, cats: renderCats, money: renderMoney, grocery: renderGrocery }[S.tab] || renderHome;
   $('#app').innerHTML = `
     <header class="topbar">
-      <h1><img src="./icon.svg" alt=""><span class="greeting">${greeting()}, ${esc(S.me)}</span></h1>
+      <h1><img src="./icon.svg" alt=""><span class="greeting-wrap"><span class="greeting">${greeting()}, ${esc(S.me)}</span>
+        <span class="today">${new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</span></span></h1>
       <div class="menu-wrap">
         <button class="btn icon ghost" data-action="menu" title="Settings" aria-label="Settings" aria-haspopup="menu" aria-expanded="${S.menuOpen ? 'true' : 'false'}">⚙️</button>
         ${S.menuOpen ? menuHtml() : ''}
@@ -757,7 +758,7 @@ function renderHome() {
       : '<p class="empty">Nothing to buy. 🎉</p>'}
   </div>`;
 
-  return `<p class="home-date">${new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+  return `
     ${expiringCard}${catsCard}${moneyCard}${groceryCard}`;
 }
 
@@ -1320,12 +1321,8 @@ function renderMoney() {
     <div class="card">
       <div class="row"><span class="grow small muted">${inc > 0 ? `${whose === 'Your' ? 'You have' : whose === 'Both of you' ? 'Together you have' : `${esc(who)} has`} spent ${Math.round((exp / inc) * 100)}% of income` : 'Add this month\'s income to see the balance'}</span></div>
       <div class="meter ${exp > inc && inc > 0 ? 'over' : ''}"><div style="width:${pct}%"></div></div>
-      <div class="row wrap" style="margin-top:12px">
-        <button class="btn primary" data-action="addTx" data-id="expense">＋ Spending</button>
-        <button class="btn" data-action="addTx" data-id="income">＋ Income</button>
-        ${!tx.some((t) => t.type === 'income') && prevIncome.length
-          ? `<button class="btn ghost" data-action="copyIncome">Copy last month's income</button>` : ''}
-      </div>
+      ${!tx.some((t) => t.type === 'income') && prevIncome.length
+        ? `<div class="row wrap" style="margin-top:12px"><button class="btn" data-action="copyIncome">Copy last month's income</button></div>` : ''}
     </div>
     ${catRows.length ? `<div class="card"><div class="section-head"><h2>Where it went</h2></div><div class="bars">
       ${catRows.map(([c, v]) => `<div class="bar-row"><span>${esc(c)}</span><div class="meter"><div style="width:${(v / maxCat) * 100}%"></div></div>
@@ -1333,7 +1330,11 @@ function renderMoney() {
     <div class="card"><div class="section-head"><h2>Income<small>${income.length}</small></h2></div>
       ${income.length ? `<ul class="list">${income.map(txItem).join('')}</ul>` : '<p class="empty">No income added for this month.</p>'}</div>
     <div class="card"><div class="section-head"><h2>Spending<small>${expenses.length}</small></h2></div>
-      ${expenses.length ? `<ul class="list">${expenses.map(txItem).join('')}</ul>` : '<p class="empty">No spending recorded yet.</p>'}</div>`;
+      ${expenses.length ? `<ul class="list">${expenses.map(txItem).join('')}</ul>` : '<p class="empty">No spending recorded yet. Tap ＋ to add.</p>'}</div>
+    <div class="fab-space" aria-hidden="true"></div>
+    <button class="fab" data-action="addTx" data-id="expense" aria-label="Add spending or income">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+    </button>`;
 }
 
 // One person's month at a glance (used on Home and in the Both tab).

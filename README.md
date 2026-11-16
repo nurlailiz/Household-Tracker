@@ -35,7 +35,7 @@ The ⚙️ button (top right) opens a menu: **Household**, **Currency**, **Recen
 
 ### 💰 Money
 - Tabs for **Mine**, **your partner's** and **👫 Both**. Each income or spending entry belongs to one of you; pick **Whose** in the form, which defaults to the tab you're on.
-- Month by month: add **income** and **spending** with a category and date
+- Month by month: tap the round **＋** (bottom right) to add **spending**, or switch it to **income** in the form, with a category and date
 - Income, spent and what's left, plus a breakdown of where the money went by category. **Both** also shows each person's balance.
 - Each person is added to the tabs the first time they sign in. Entries from before this change belong to whoever added them.
 - **Copy last month's income** with one tap; the currency symbol is set in ⚙️ → **Currency**
