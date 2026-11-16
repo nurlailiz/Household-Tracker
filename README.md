@@ -10,9 +10,12 @@ The first screen: an overview of everything.
 - **💰 This month:** each person's income, spending and what's left. Tap a person to open their Money tab.
 - **🛒 To buy:** the shopping list, which you can tick off right there, plus anything **⚠️ expiring soon**.
 
-**Who changed what:** every cat record, weight, meal, date, income, spending and grocery item shows who added it or last updated it, and when (for example *Updated by Husband · 5m ago*). Edit forms show the full history. The 🕘 button lists recent activity from both of you across all modules.
+**Who changed what:** every cat record, weight, meal, date, income, spending and grocery item shows who added it or last updated it, and when (for example *Updated by Husband · 5m ago*). Edit forms show the full history. **⚙️ → Recent activity** lists recent changes from both of you across all modules.
 
-### ⚙️ Settings · Household
+### ⚙️ Settings menu
+The ⚙️ button (top right) opens a menu: **Household**, **Currency**, **Recent activity**, **Refresh app**, **Import records** and **Sign out**. The header greets whoever is signed in ("Good morning / afternoon / evening, …").
+
+**Household**
 - **👨‍👩‍🐈 Household** lists everyone in the home: the two of you, each with a role, and every cat (🐱 Cat). Tap a cat to open it.
 - Each of you sets **your own role** (Wife, Husband, Partner or Other); the app doesn't let you change the other person's. Roles also show next to your names on Home and in Money.
 - Each person appears after they've signed in once.
@@ -28,14 +31,14 @@ The first screen: an overview of everything.
 - **Feeding schedule** ordered by time
 - **Important dates** (vaccination, deflea, deworm, vet visit…). Add a *next due* date and it appears under **Coming up** in the **All cats** overview 30 days before. It turns amber 14 days out and red when overdue.
 
-**Importing records:** ⚙️ Settings → **📥 Import cat records** takes an import file (`.json`), shows a preview, then saves it under your name. Cats are matched by name, and anything already in the app is skipped, so importing the same file twice is safe. Keep import files out of this repo, because it's public.
+**Importing records:** ⚙️ → **📥 Import records** takes an import file (`.json`), shows a preview, then saves it under your name. Cats are matched by name, and anything already in the app is skipped, so importing the same file twice is safe. Keep import files out of this repo, because it's public.
 
 ### 💰 Money
 - Tabs for **Mine**, **your partner's** and **👫 Both**. Each income or spending entry belongs to one of you; pick **Whose** in the form, which defaults to the tab you're on.
 - Month by month: add **income** and **spending** with a category and date
 - Income, spent and what's left, plus a breakdown of where the money went by category. **Both** also shows each person's balance.
 - Each person is added to the tabs the first time they sign in. Entries from before this change belong to whoever added them.
-- **Copy last month's income** with one tap; the currency symbol is set in ⚙️ Settings
+- **Copy last month's income** with one tap; the currency symbol is set in ⚙️ → **Currency**
 
 ### 🛒 Grocery
 - Type what ran out and tap **Add**. Today's date is saved automatically.
@@ -95,7 +98,7 @@ To try it on your own computer, run `npm start` and open http://localhost:3000. 
 
 ## Version
 
-The app's version shows at the bottom of every screen (e.g. **V1.0**). It's set in `public/version.js` and goes up by 0.1 with every change (1.0 → 1.1 → … → 1.9 → 2.0). If the number at the bottom hasn't changed after an update, your phone is still using a saved older copy. Go to **⚙️ Settings → 🔄 Refresh app**: it checks the latest version, downloads fresh copies of the app's files and reloads (your data isn't affected).
+The app's version shows at the bottom of every screen (e.g. **V1.0**). It's set in `public/version.js` and goes up by 0.1 with every change (1.0 → 1.1 → … → 1.9 → 2.0). If the number at the bottom hasn't changed after an update, your phone is still using a saved older copy. Open **⚙️** and look at **Refresh app**: it's greyed out ("up to date") when you have the newest version, and says **Update to V…** when there's a newer one. Tapping it downloads fresh copies of the app's files and reloads (your data isn't affected).
 
 ## Files
 

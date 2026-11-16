@@ -435,10 +435,11 @@ function render() {
   const body = { home: renderHome, cats: renderCats, money: renderMoney, grocery: renderGrocery }[S.tab] || renderHome;
   $('#app').innerHTML = `
     <header class="topbar">
-      <h1><img src="./icon.svg" alt="">Our Home</h1>
-      <span class="who">${personDot(S.me)}${esc(S.me)}</span>
-      <button class="btn icon ghost" data-action="activity" title="Recent activity" aria-label="Recent activity">🕘</button>
-      <button class="btn icon ghost" data-action="settings" title="Settings" aria-label="Settings">⚙️</button>
+      <h1><img src="./icon.svg" alt=""><span class="greeting">${greeting()}, ${esc(S.me)}</span></h1>
+      <div class="menu-wrap">
+        <button class="btn icon ghost" data-action="menu" title="Settings" aria-label="Settings" aria-haspopup="menu" aria-expanded="${S.menuOpen ? 'true' : 'false'}">⚙️</button>
+        ${S.menuOpen ? menuHtml() : ''}
+      </div>
     </header>
     <nav class="tabs">${TABS.map((t) => `<button data-tab="${t.id}" ${S.tab === t.id ? 'aria-current="page"' : ''}>
       ${t.id === 'grocery' && expiringSoon().length ? `<span class="tab-badge" aria-label="${expiringSoon().length} expiring soon">${expiringSoon().length}</span>` : ''}
@@ -452,6 +453,7 @@ function render() {
 }
 
 document.addEventListener('click', (e) => {
+  if (S.menuOpen && !e.target.closest('.menu, [data-action=menu]')) { S.menuOpen = false; render(); }
   const tab = e.target.closest('[data-tab]');
   if (tab) {
     S.tab = tab.dataset.tab;
@@ -480,6 +482,7 @@ document.addEventListener('touchend', (e) => {
 document.addEventListener('dblclick', (e) => { if (!e.target.closest?.('input, textarea, [contenteditable]')) e.preventDefault(); });
 
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && S.menuOpen) { S.menuOpen = false; render(); $('[data-action=menu]')?.focus(); return; }
   if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role=button][data-action]')) { e.preventDefault(); e.target.click(); }
 });
 
@@ -510,27 +513,92 @@ function householdHtml() {
   </section>`;
 }
 
-ACTIONS.settings = () => openForm({
-  title: 'Settings',
+const greeting = () => {
+  const h = new Date().getHours();
+  return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+};
+
+// ---------- Settings menu (⚙️) ----------
+const MENU_ICONS = {
+  household: '<path d="M3 11l9-7 9 7"></path><path d="M5 10v10h14V10"></path><path d="M10 20v-5h4v5"></path>',
+  currency: '<circle cx="12" cy="12" r="8.5"></circle><path d="M14.5 9.2c-.5-.8-1.5-1.2-2.5-1.2-1.4 0-2.5.8-2.5 2s1.1 1.7 2.5 2 2.5.8 2.5 2-1.1 2-2.5 2c-1 0-2-.4-2.5-1.2M12 6.5v1.5M12 16v1.5"></path>',
+  activity: '<circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5V12l3 2"></path>',
+  refresh: '<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"></path><path d="M4 4v4h4"></path><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"></path><path d="M20 20v-4h-4"></path>',
+  import: '<path d="M12 4v11"></path><path d="M7.5 10.5 12 15l4.5-4.5"></path><path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2"></path>',
+  signout: '<path d="M14 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4"></path><path d="M10 16l-4-4 4-4"></path><path d="M6 12h10"></path>',
+};
+const menuIcon = (k) => `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${MENU_ICONS[k]}</svg>`;
+
+// Refresh app: checked each time the menu opens (at most once a minute).
+S.update = { state: 'idle', latest: null, at: 0 };
+async function checkForUpdate() {
+  if (S.update.state === 'checking' || Date.now() - S.update.at < 60000) return;
+  S.update = { state: 'checking', latest: null, at: Date.now() };
+  try {
+    const latest = await latestVersion();
+    S.update = { state: latest && latest !== APP_VERSION ? 'newer' : 'latest', latest, at: Date.now() };
+  } catch {
+    S.update = { state: 'error', latest: null, at: 0 };
+  }
+  if (S.menuOpen) render();
+}
+
+function menuHtml() {
+  const u = S.update;
+  const refresh = {
+    checking: { label: 'Refresh app', hint: 'Checking…', disabled: true },
+    latest: { label: 'Refresh app', hint: `V${APP_VERSION} · up to date`, disabled: true },
+    newer: { label: `Update to V${u.latest}`, hint: `You have V${APP_VERSION}`, disabled: false, fresh: true },
+    error: { label: 'Refresh app', hint: "Couldn't check for updates", disabled: false },
+    idle: { label: 'Refresh app', hint: 'Checking…', disabled: true },
+  }[u.state];
+  const item = (action, icon, label, hint = '', extra = '') => `<button role="menuitem" class="menu-item ${extra}" data-action="${action}">
+      ${menuIcon(icon)}<span class="grow"><span class="menu-label">${label}</span>${hint ? `<span class="menu-hint">${hint}</span>` : ''}</span></button>`;
+  return `<div class="menu" role="menu" aria-label="Settings">
+    ${item('openHousehold', 'household', 'Household', esc(people().map((p) => roleOf(p) ? `${p} (${roleOf(p)})` : p).join(' · ')))}
+    ${item('openCurrency', 'currency', 'Currency', esc(S.db.settings.currency))}
+    ${item('activity', 'activity', 'Recent activity')}
+    <button role="menuitem" class="menu-item ${refresh.fresh ? 'fresh' : ''}" data-action="forceRefresh" ${refresh.disabled ? 'disabled aria-disabled="true"' : ''}>
+      ${menuIcon('refresh')}<span class="grow"><span class="menu-label">${refresh.label}</span><span class="menu-hint">${refresh.hint}</span></span></button>
+    ${item('openImport', 'import', 'Import records')}
+    <hr>
+    ${item('signOut', 'signout', 'Sign out', '', 'danger')}
+  </div>`;
+}
+
+ACTIONS.menu = () => {
+  S.menuOpen = !S.menuOpen;
+  render();
+  if (S.menuOpen) {
+    checkForUpdate();
+    $('.menu .menu-item:not([disabled])')?.focus();
+  }
+};
+
+// Every menu item closes the menu first.
+const fromMenu = (fn) => (...args) => {
+  if (S.menuOpen) { S.menuOpen = false; render(); }
+  return fn(...args);
+};
+
+ACTIONS.openHousehold = fromMenu(() => openForm({
+  title: 'Household',
   meta: householdHtml(),
   fields: [
     { name: 'role', label: `Your role (${S.me})`, type: 'select', value: roleOf(S.me),
       options: [{ value: '', label: 'Choose your role…' }, ...ROLES.map((r) => ({ value: r, label: r }))] },
-    { name: 'currency', label: 'Currency symbol', value: S.db.settings.currency, required: true, placeholder: 'e.g. $, RM, £, €' },
   ],
-  footer: `<div class="row wrap" style="margin:0 0 8px">
-      <button type="button" class="btn" data-action="forceRefresh">🔄 Refresh app</button>
-      <button type="button" class="btn" data-action="openImport">📥 Import cat records…</button></div>
-    <p class="small muted" style="margin:0 0 8px">You're on V${APP_VERSION}. Refresh app downloads the newest version.</p>`,
   // Only your own entry in "roles" is changed; your partner's stays as they set it.
-  onSubmit: (v) => saveSettings({
-    currency: v.currency.trim().slice(0, 6) || '$',
-    roles: { ...(S.db.settings.roles || {}), [S.me]: v.role || '' },
-  }, 'Settings saved'),
-  onDelete: () => signOut(auth),
-  deleteLabel: 'Sign out',
-  confirmDelete: false,
-});
+  onSubmit: (v) => saveSettings({ roles: { ...(S.db.settings.roles || {}), [S.me]: v.role || '' } }, 'Role saved'),
+}));
+
+ACTIONS.openCurrency = fromMenu(() => openForm({
+  title: 'Currency',
+  fields: [{ name: 'currency', label: 'Currency symbol', value: S.db.settings.currency, required: true, placeholder: 'e.g. RM, $, £, €' }],
+  onSubmit: (v) => saveSettings({ currency: v.currency.trim().slice(0, 6) || '$' }, 'Currency saved'),
+}));
+
+ACTIONS.signOut = fromMenu(() => signOut(auth));
 
 // ============================================================
 // Import (Settings → Import cat records)
@@ -583,11 +651,11 @@ function runImport(plan) {
   background(batch.commit());
 }
 
-ACTIONS.openImport = () => {
+ACTIONS.openImport = fromMenu(() => {
   const modal = $('#modal');
   if (modal.open) modal.close();
   modal.innerHTML = `<form id="importForm">
-    <h3>📥 Import cat records</h3>
+    <h3>📥 Import records</h3>
     <p class="small muted" style="margin-top:-8px">Choose the import file, or paste its contents. You'll see what will be added before anything is saved.</p>
     <p><label class="btn">Choose file<input type="file" id="importFile" accept=".json,application/json,text/plain" hidden></label></p>
     <label class="field"><span>…or paste it here</span><textarea id="importText" rows="4" spellcheck="false"></textarea></label>
@@ -642,14 +710,12 @@ ACTIONS.openImport = () => {
     toast('Imported. Both phones will see it shortly.');
   };
   modal.showModal();
-};
+});
 
 // ============================================================
 // Home: the overview of everything
 // ============================================================
 function renderHome() {
-  const hour = new Date().getHours();
-  const hello = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const catById = Object.fromEntries(S.db.cats.map((c) => [c.id, c]));
   const due = dueList().filter((x) => catById[x.e.catId]).slice(0, 5);
   const toBuy = S.db.groceries.filter((g) => !g.bought)
@@ -691,8 +757,7 @@ function renderHome() {
       : '<p class="empty">Nothing to buy. 🎉</p>'}
   </div>`;
 
-  return `<div class="home-hello"><h2>${hello}, ${esc(S.me)}</h2>
-      <p class="muted">${new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</p></div>
+  return `<p class="home-date">${new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</p>
     ${expiringCard}${catsCard}${moneyCard}${groceryCard}`;
 }
 
@@ -736,7 +801,7 @@ function activityItems(limit = 40) {
   return items.sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit);
 }
 
-ACTIONS.activity = () => {
+ACTIONS.activity = fromMenu(() => {
   const items = activityItems();
   const modal = $('#modal');
   modal.innerHTML = `<form method="dialog">
@@ -749,7 +814,7 @@ ACTIONS.activity = () => {
     <div class="modal-actions"><span class="spacer"></span><button class="btn primary" value="close">Close</button></div>
   </form>`;
   modal.showModal();
-};
+});
 
 // ============================================================
 // Cats
@@ -1495,19 +1560,20 @@ async function latestVersion() {
 }
 
 ACTIONS.forceRefresh = async (_, btn) => {
+  const label = btn.querySelector('.menu-label') || btn;
   btn.disabled = true;
-  btn.textContent = 'Checking…';
+  label.textContent = 'Checking…';
   let latest;
   try {
     latest = await latestVersion();
   } catch {
     // Offline: reloading now could leave the app unable to start, so stop here.
     btn.disabled = false;
-    btn.textContent = '🔄 Refresh app';
+    label.textContent = 'Refresh app';
     toast("No connection. Can't refresh right now.");
     return;
   }
-  btn.textContent = latest && latest !== APP_VERSION ? `Updating to V${latest}…` : 'Refreshing…';
+  label.textContent = latest && latest !== APP_VERSION ? `Updating to V${latest}…` : 'Refreshing…';
   try { sessionStorage.setItem('refreshedFrom', APP_VERSION); } catch { /* ignore */ }
   // Re-download every app file, replacing the copies the phone has saved, then reload.
   await Promise.allSettled(APP_FILES.map((u) => fetch(u, { cache: 'reload' })));

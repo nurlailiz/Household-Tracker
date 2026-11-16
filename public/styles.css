@@ -326,3 +326,27 @@ dialog h3:focus { outline: none; }
 .facts.health { margin-top: 10px; }
 .facts.health .meta { color: var(--muted); font-size: .8rem; margin-top: 2px; }
 .facts.health .badge { font-size: .8rem; }
+
+/* ---------- Header greeting + settings menu ---------- */
+.topbar h1 { min-width: 0; }
+.topbar .greeting { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-wrap { position: relative; flex-shrink: 0; }
+.menu {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 30; width: 270px; max-width: calc(100vw - 24px);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 6px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .16); display: flex; flex-direction: column;
+}
+.menu hr { border: 0; border-top: 1px solid var(--border); margin: 6px 4px; }
+.menu-item {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 8px 10px;
+  border: 0; border-radius: 10px; background: none; cursor: pointer; text-align: left; color: var(--text);
+}
+.menu-item:hover:not([disabled]), .menu-item:focus-visible { background: var(--surface-2); outline: none; }
+.menu-item svg { flex-shrink: 0; color: var(--muted); }
+.menu-item .menu-label { display: block; font-weight: 600; font-size: .95rem; }
+.menu-item .menu-hint { display: block; font-size: .78rem; color: var(--muted); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-item[disabled] { cursor: default; }
+.menu-item[disabled] .menu-label, .menu-item[disabled] svg { color: var(--muted); }
+.menu-item.fresh .menu-label, .menu-item.fresh svg { color: var(--accent); }
+.menu-item.danger .menu-label, .menu-item.danger svg { color: var(--danger); }
+.home-date { margin: 0 2px 12px; color: var(--muted); font-size: .95rem; }
