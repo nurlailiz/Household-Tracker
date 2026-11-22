@@ -295,6 +295,11 @@ function openForm({ title, fields, submitLabel = 'Save', onSubmit, onDelete, del
         placeholder="${esc(f.placeholder || '')}" autocomplete="off">`;
       if (f.suggestions) input += `<datalist id="${id}_list">${f.suggestions.map((s) => `<option value="${esc(s)}">`).join('')}</datalist>`;
     }
+    // Optional dates get a Clear button: iPhone date pickers have no way to empty a date once it's set.
+    if (f.clearable) {
+      return `<div class="field"><label for="${id}"><span>${esc(f.label)}</span></label>
+        <div class="clear-wrap">${input}<button type="button" class="btn clear-btn" data-clear="${id}" aria-label="Clear ${esc(f.label)}" ${v ? '' : 'hidden'}>Clear</button></div></div>`;
+    }
     return `<label class="field" for="${id}"><span>${esc(f.label)}${f.required ? ' *' : ''}</span>${input}</label>`;
   };
 
@@ -314,6 +319,14 @@ function openForm({ title, fields, submitLabel = 'Save', onSubmit, onDelete, del
   const form = $('form', modal);
   const err = $('#formError', modal);
   $('#formCancel', modal).onclick = () => modal.close();
+
+  modal.querySelectorAll('[data-clear]').forEach((b) => {
+    const inp = $(`#${b.dataset.clear}`, modal);
+    const sync = () => { b.hidden = !inp.value; };
+    inp.addEventListener('input', sync);
+    inp.addEventListener('change', sync);
+    b.addEventListener('click', () => { inp.value = ''; sync(); inp.dispatchEvent(new Event('change', { bubbles: true })); });
+  });
 
   const photoInput = $('#photoInput', modal);
   if (photoInput) {
@@ -1224,13 +1237,13 @@ function catForm(cat) {
       { name: 'name', label: 'Name', required: true, value: cat?.name },
       { name: 'breed', label: 'Breed', value: cat?.breed, placeholder: 'e.g. Domestic shorthair' },
       { name: 'sex', label: 'Sex', type: 'select', options: ['', 'Female', 'Male'], value: cat?.sex || '' },
-      { name: 'birthday', label: 'Birthday (or estimate)', type: 'date', value: cat?.birthday },
-      { name: 'adopted', label: 'Adopted on', type: 'date', value: (cat && adoptedOf(cat)) || '' },
+      { name: 'birthday', label: 'Birthday (or estimate)', type: 'date', clearable: true, value: cat?.birthday },
+      { name: 'adopted', label: 'Adopted on', type: 'date', clearable: true, value: (cat && adoptedOf(cat)) || '' },
       { name: 'color', label: 'Colour / markings', value: cat?.color },
       { name: 'microchip', label: 'Microchip no.', value: cat?.microchip },
       { name: 'fivFelv', label: 'FIV/FeLV result', type: 'select', value: (cat && fivFelvOf(cat)?.result) || '',
         options: [{ value: '', label: 'Not tested yet' }, ...FIV_RESULTS.map((r) => ({ value: r, label: r }))] },
-      { name: 'fivFelvDate', label: 'FIV/FeLV test date', type: 'date', value: (cat && fivFelvOf(cat)?.date) || '' },
+      { name: 'fivFelvDate', label: 'FIV/FeLV test date', type: 'date', clearable: true, value: (cat && fivFelvOf(cat)?.date) || '' },
       { name: 'vaccineStatus', label: 'Vaccination status', type: 'select', value: cat?.vaccineStatus || '',
         options: [{ value: '', label: 'Automatic (from Important dates)' },
           ...['Not vaccinated', '1st dose done', '2nd dose done', 'Fully vaccinated'].map((r) => ({ value: r, label: r === 'Fully vaccinated' ? 'Fully vaccinated (3 doses)' : r }))] },
@@ -1297,7 +1310,7 @@ function eventForm(ev) {
     fields: [
       { name: 'type', label: 'What', type: 'select', options: types, required: true, value: ev?.type || 'Vaccination' },
       { name: 'date', label: 'Date (done, or planned)', type: 'date', required: true, value: ev?.date || today() },
-      { name: 'nextDue', label: 'Next due (optional)', type: 'date', value: ev?.nextDue },
+      { name: 'nextDue', label: 'Next due (optional)', type: 'date', clearable: true, value: ev?.nextDue },
       { name: 'notes', label: 'Notes', value: ev?.notes, placeholder: 'e.g. Brand, vet clinic, batch no.' },
     ],
     onSubmit: (v) => ev ? save('events', ev.id, v, 'Saved')
@@ -1785,7 +1798,7 @@ ACTIONS.addStock = () => openForm({
     { name: 'name', label: 'Item', required: true, suggestions: [...new Set(S.db.groceries.map((g) => g.name))] },
     { name: 'quantity', label: 'Quantity' },
     { name: 'boughtDate', label: 'Bought on', type: 'date', required: true, value: today() },
-    { name: 'expiry', label: 'Expiry date (optional)', type: 'date' },
+    { name: 'expiry', label: 'Expiry date (optional)', type: 'date', clearable: true },
     { name: 'note', label: 'Note', placeholder: 'e.g. brand, where it is kept' },
   ],
   onSubmit: (v) => save('groceries', null, { ...v, bought: true, boughtBy: S.me, addedDate: v.boughtDate || today() }, `${v.name.trim()} added to In stock`),
@@ -1802,7 +1815,7 @@ ACTIONS.editGrocery = (id) => {
       { name: 'note', label: 'Note', value: g.note, placeholder: 'e.g. brand, store' },
       ...(g.bought ? [
         { name: 'boughtDate', label: 'Bought on', type: 'date', required: true, value: g.boughtDate },
-        { name: 'expiry', label: 'Expiry date (optional)', type: 'date', value: g.expiry },
+        { name: 'expiry', label: 'Expiry date (optional)', type: 'date', clearable: true, value: g.expiry },
       ] : [
         { name: 'addedDate', label: 'Ran out on', type: 'date', required: true, value: g.addedDate },
       ]),

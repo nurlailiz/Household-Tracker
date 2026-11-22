@@ -450,3 +450,11 @@ dialog form { overflow-x: hidden; }
 /* ---------- Carry-over row ---------- */
 .carry-row > li { background: var(--accent-soft); border-radius: 10px; padding: 10px; margin-bottom: 4px; }
 .carry-ico { font-size: 1.2rem; color: var(--accent); width: 20px; text-align: center; }
+
+/* ---------- Clear button for optional dates ---------- */
+div.field { margin-bottom: 12px; }
+div.field > label > span { display: block; font-size: .85rem; color: var(--muted); margin-bottom: 4px; }
+.clear-wrap { display: flex; gap: 8px; align-items: stretch; }
+.clear-wrap input { flex: 1; min-width: 0; }
+.clear-btn { min-height: 46px; padding: 0 14px; border-radius: 10px; flex-shrink: 0; color: var(--danger); background: var(--surface-2); border-color: var(--border); font-weight: 600; }
+.clear-btn[hidden] { display: none; }
