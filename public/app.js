@@ -101,9 +101,20 @@ function history(item) {
 function toast(msg) {
   const t = $('#toast');
   t.textContent = msg;
+  t.classList.remove('actionable');
   t.classList.add('show');
   clearTimeout(toast.t);
   toast.t = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+// A toast with a button (e.g. Undo), shown a little longer.
+function toastAction(msg, label, fn) {
+  const t = $('#toast');
+  t.innerHTML = `<span>${esc(msg)}</span><button type="button" class="toast-btn">${esc(label)}</button>`;
+  t.classList.add('show', 'actionable');
+  $('.toast-btn', t).onclick = () => { t.classList.remove('show', 'actionable'); fn(); };
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => t.classList.remove('show', 'actionable'), 5000);
 }
 
 // ============================================================
@@ -857,8 +868,9 @@ function renderHome() {
     <div class="section-head"><h2>🛒 To buy<small>${toBuy.length}</small></h2>${more('grocery')}</div>
     ${toBuy.length ? `<ul class="list">${shown.map((g) => `<li>
         <button class="check" data-action="toggleGrocery" data-id="${g.id}" aria-label="Mark ${esc(g.name)} as bought">✓</button>
+        <span class="g-emoji sm" aria-hidden="true">${groceryKind(g.name).emoji}</span>
         <div class="grow"><div class="title">${esc(g.name)}${g.quantity ? ` <span class="muted">· ${esc(g.quantity)}</span>` : ''}</div>
-        <div class="meta">Out since ${fmtShort(g.addedDate)}${g.createdBy ? ` · ${esc(g.createdBy)}` : ''}</div></div></li>`).join('')}</ul>
+        <div class="meta">Out since ${fmtShort(g.addedDate)}</div></div></li>`).join('')}</ul>
       ${toBuy.length > shown.length ? `<p class="small muted" style="margin:8px 0 0">and ${toBuy.length - shown.length} more…</p>` : ''}`
       : '<p class="empty">Nothing to buy. 🎉</p>'}
   </div>`;
@@ -1735,67 +1747,283 @@ function expiryBadge(date) {
   return `<span class="badge">Exp ${fmtShort(date)}</span>`;
 }
 
+// ---------- Grocery item → emoji + section (English and Malay names; first match wins) ----------
+const GROCERY_SECTIONS = ['Dairy & Eggs', 'Meat & Seafood', 'Vegetables', 'Fruits', 'Bakery', 'Rice, Noodles & Dry', 'Cooking & Sauces',
+  'Drinks', 'Snacks', 'Frozen', 'Household', 'Personal care', 'Health', 'Pets', 'Other'];
+const GROCERY_KINDS = [
+  // Pets
+  [/cat ?food|makanan kucing|kibble|whiskas|royal canin|babycat|fancy feast|friskies|\bme-?o\b|felix|purina|sheba|cat treat|churu|wet food|dry food/, '🐱', 'Pets'],
+  [/litter|pasir kucing|tofu sand/, '🐾', 'Pets'],
+  [/dog food|pet food|\bpets?\b/, '🐾', 'Pets'],
+  // Health
+  [/plaster|bandage|band-aid/, '🩹', 'Health'],
+  [/panadol|paracetamol|medicine|\bubat\b(?! gigi| nyamuk)|vitamin|supplement|minyak angin|antiseptic|dettol|thermometer|face ?mask/, '💊', 'Health'],
+  // Personal care
+  [/toothpaste|ubat gigi|colgate|darlie|sensodyne|toothbrush|berus gigi|floss/, '🪥', 'Personal care'],
+  [/shampoo|syampu|conditioner|body ?wash|lotion|sunscreen|deodorant|facial|cleanser|moisturi[sz]er|sabun mandi/, '🧴', 'Personal care'],
+  [/tissue|tisu|toilet ?(roll|paper)|kitchen towel|wet ?wipes/, '🧻', 'Personal care'],
+  [/razor|shaver|pencukur/, '🪒', 'Personal care'],
+  [/sanitary|tuala wanita|diaper|lampin|cotton bud/, '🧷', 'Personal care'],
+  // Household
+  [/dish ?wash|basuh pinggan|sunlight|sponge|\bspan\b|scrub/, '🧽', 'Household'],
+  [/detergent|softener|downy|breeze|dynamo|clorox|bleach|peluntur|floor clean|pencuci|cecair/, '🧺', 'Household'],
+  [/garbage|trash|plastik sampah|bin ?bag/, '🗑️', 'Household'],
+  [/freshener|pewangi|glade|ambi ?pur|febreze/, '🌸', 'Household'],
+  [/bulb|mentol|lampu/, '💡', 'Household'],
+  [/batter(y|ies)|bateri/, '🔋', 'Household'],
+  [/insect|ridsect|ubat nyamuk|mosquito|shieldtox/, '🦟', 'Household'],
+  [/foil|cling ?wrap|baking paper|ziplock|plastic bag|beg plastik/, '📦', 'Household'],
+  [/\bsoap\b|\bsabun\b|hand ?wash/, '🧼', 'Personal care'],
+  // Frozen
+  [/ice ?cream|aiskrim/, '🍦', 'Frozen'],
+  [/nugget/, '🍗', 'Frozen'],
+  [/fries|kentang goreng/, '🍟', 'Frozen'],
+  [/pizza/, '🍕', 'Frozen'],
+  [/dumpling|gyoza|dim ?sum/, '🥟', 'Frozen'],
+  [/fish ?ball|bebola|fishcake|yong tau/, '🍢', 'Frozen'],
+  [/\bice\b|\bais\b|frozen|beku/, '🧊', 'Frozen'],
+  // Cooking specifics that would otherwise match something else
+  [/santan|coconut milk|coconut cream/, '🥥', 'Cooking & Sauces'],
+  [/soy ?sauce|kicap|oyster sauce|sos tiram|sauce|\bsos\b|ketchup|mayo|vinegar|cuka|sambal/, '🫙', 'Cooking & Sauces'],
+  [/lada hitam|lada putih|black pepper|white pepper|\bpepper\b/, '🧂', 'Cooking & Sauces'],
+  [/stock cube|kiub|maggi cube|ajinomoto|\bmsg\b/, '🧂', 'Cooking & Sauces'],
+  [/corn ?flakes|koko krunch|cereal|\boats?\b|granola|muesli|bijirin/, '🥣', 'Rice, Noodles & Dry'],
+  [/corn ?flour|tepung jagung|\bflour\b|tepung/, '🌾', 'Rice, Noodles & Dry'],
+  // Dairy & Eggs
+  [/cheese|keju/, '🧀', 'Dairy & Eggs'],
+  [/butter(?!cup)|mentega|margarine|planta|buttercup/, '🧈', 'Dairy & Eggs'],
+  [/yogh?urt|yakult|vitagen/, '🥣', 'Dairy & Eggs'],
+  [/eggplant|terung|brinjal/, '🍆', 'Vegetables'],
+  [/\beggs?\b|telur/, '🥚', 'Dairy & Eggs'],
+  [/milk|susu|dutch lady|farm fresh|marigold|goodday|fernleaf|\bcream\b|krim/, '🥛', 'Dairy & Eggs'],
+  // Meat & Seafood
+  [/sausage|sosej|hot ?dog|frankfurter/, '🌭', 'Meat & Seafood'],
+  [/chicken|ayam|drumstick|wing/, '🍗', 'Meat & Seafood'],
+  [/beef|daging|steak|mince|lamb|kambing|mutton|patty/, '🥩', 'Meat & Seafood'],
+  [/prawn|udang|shrimp/, '🦐', 'Meat & Seafood'],
+  [/squid|sotong|calamari/, '🦑', 'Meat & Seafood'],
+  [/crab|ketam/, '🦀', 'Meat & Seafood'],
+  [/fish|ikan|salmon|tuna|sardin|kembung|bilis|anchov|\bcod\b|dory|tenggiri|siakap|keli|kerapu/, '🐟', 'Meat & Seafood'],
+  // Vegetables
+  [/tomato/, '🍅', 'Vegetables'],
+  [/cucumber|timun/, '🥒', 'Vegetables'],
+  [/sweet potato|keledek|ubi/, '🍠', 'Vegetables'],
+  [/potato|kentang/, '🥔', 'Vegetables'],
+  [/garlic|bawang putih/, '🧄', 'Vegetables'],
+  [/onion|bawang|shallot/, '🧅', 'Vegetables'],
+  [/chill?i|cili|cabai|\blada\b/, '🌶️', 'Vegetables'],
+  [/carrot|lobak merah/, '🥕', 'Vegetables'],
+  [/broccoli|brokoli|cauliflower|kubis bunga/, '🥦', 'Vegetables'],
+  [/\bcorn\b|jagung/, '🌽', 'Vegetables'],
+  [/mushroom|cendawan/, '🍄', 'Vegetables'],
+  [/ginger|halia|lengkuas|serai|lemongrass|kunyit|turmeric/, '🫚', 'Vegetables'],
+  [/bean ?sprout|tauge|taugeh/, '🌱', 'Vegetables'],
+  [/long bean|kacang panjang|buncis|french bean|\bpeas?\b/, '🫛', 'Vegetables'],
+  [/pumpkin|\blabu\b/, '🎃', 'Vegetables'],
+  [/lettuce|salad|spinach|bayam|kangkung|sawi|cabbage|kobis|kubis|pak ?choy|bok ?choy|kailan|choy ?sum|bendi|okra|lady'?s? ?finger|vegetable|sayur|daun|herb|celery|saderi|parsley|coriander|ketumbar|pudina|mint/, '🥬', 'Vegetables'],
+  // Fruits
+  [/pineapple|nanas/, '🍍', 'Fruits'],
+  [/apple|epal/, '🍎', 'Fruits'],
+  [/banana|pisang/, '🍌', 'Fruits'],
+  [/watermelon|tembikai/, '🍉', 'Fruits'],
+  [/mandarin|orange|oren|limau mandarin/, '🍊', 'Fruits'],
+  [/lemon|\blimes?\b|limau/, '🍋', 'Fruits'],
+  [/grape|anggur/, '🍇', 'Fruits'],
+  [/strawberr/, '🍓', 'Fruits'],
+  [/blueberr/, '🫐', 'Fruits'],
+  [/mango|mangga/, '🥭', 'Fruits'],
+  [/coconut|kelapa/, '🥥', 'Fruits'],
+  [/avocado/, '🥑', 'Fruits'],
+  [/\bpears?\b|\bpir\b/, '🍐', 'Fruits'],
+  [/cherr/, '🍒', 'Fruits'],
+  [/kiwi/, '🥝', 'Fruits'],
+  [/peach/, '🍑', 'Fruits'],
+  [/melon/, '🍈', 'Fruits'],
+  [/papaya|betik|durian|rambutan|langsat|jambu|guava|dragon ?fruit|buah naga|\bfruits?\b|\bbuah\b/, '🍑', 'Fruits'],
+  // Bakery
+  [/croissant/, '🥐', 'Bakery'],
+  [/bagel/, '🥯', 'Bakery'],
+  [/\bcakes?\b|\bkek\b|muffin|cupcake/, '🍰', 'Bakery'],
+  [/bread|\broti\b|\bbuns?\b|gardenia|massimo|sandwich|baguette/, '🍞', 'Bakery'],
+  // Rice, noodles & dry goods
+  [/\brice\b|beras|\bnasi\b/, '🍚', 'Rice, Noodles & Dry'],
+  [/pasta|spaghetti|macaroni|penne|fusilli|lasagn/, '🍝', 'Rice, Noodles & Dry'],
+  [/\bmee\b|\bmi\b|noodle|maggi|bihun|kuey ?teow|ramen|udon|instant/, '🍜', 'Rice, Noodles & Dry'],
+  [/sugar|\bgula\b/, '🍬', 'Rice, Noodles & Dry'],
+  [/honey|\bmadu\b/, '🍯', 'Rice, Noodles & Dry'],
+  [/\bjam\b|nutella|peanut butter|\bkaya\b|spread/, '🫙', 'Rice, Noodles & Dry'],
+  [/canned|\btin\b|\bcan\b|baked beans/, '🥫', 'Rice, Noodles & Dry'],
+  // Cooking & sauces
+  [/\boil\b|minyak/, '🫗', 'Cooking & Sauces'],
+  [/\bsalt\b|garam/, '🧂', 'Cooking & Sauces'],
+  [/soy ?sauce|kicap|oyster sauce|sos tiram|sauce|\bsos\b|ketchup|mayo|vinegar|cuka|sambal|paste|pes\b/, '🫙', 'Cooking & Sauces'],
+  [/spice|rempah|curry|\bkari\b|serbuk|stock/, '🧂', 'Cooking & Sauces'],
+  // Drinks
+  [/coffee|kopi|nescafe|espresso|latte/, '☕', 'Drinks'],
+  [/\btea\b|\bteh\b|lipton|\bboh\b|green tea/, '🍵', 'Drinks'],
+  [/milo|horlicks|ovaltine|cocoa/, '🥤', 'Drinks'],
+  [/juice|\bjus\b/, '🧃', 'Drinks'],
+  [/water|air mineral|mineral|spritzer|cactus|\bair\b/, '💧', 'Drinks'],
+  [/soda|coke|cola|pepsi|100 ?plus|sprite|f&n|drink|minuman|kordial|cordial|ribena|sirap/, '🥤', 'Drinks'],
+  // Snacks
+  [/chocolate|coklat|kitkat|cadbury|m&m/, '🍫', 'Snacks'],
+  [/biscuit|biskut|cookie|cracker|jacob|hup seng|oreo/, '🍪', 'Snacks'],
+  [/nuts?\b|kacang tanah|peanut|almond|cashew|pistachio/, '🥜', 'Snacks'],
+  [/\bkacang\b|lentil|\bdh?al\b|chickpea/, '🫘', 'Rice, Noodles & Dry'],
+  [/chips|crisps|kerepek|keropok|snack|mister potato|pringles|popcorn/, '🍿', 'Snacks'],
+  [/candy|gula-gula|sweets|gumm(y|ies)|lollipop/, '🍬', 'Snacks'],
+];
+const kindCache = new Map();
+function groceryKind(name) {
+  const n = String(name || '').toLowerCase();
+  if (!kindCache.has(n)) {
+    const hit = GROCERY_KINDS.find(([re]) => re.test(n));
+    kindCache.set(n, hit ? { emoji: hit[1], section: hit[2] } : { emoji: '🛒', section: 'Other' });
+  }
+  return kindCache.get(n);
+}
+
+const groceryMeta = (g) => [g.quantity, g.note].filter(Boolean).map(esc).join(' · ');
+const INFO_ICON = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5.5"></path><path d="M12 7.6h.01"></path></svg>';
+
+// One grocery card: emoji · name & quantity · (expiry) · ⓘ · tick. Swipe left to remove.
+function groceryItemCard(g) {
+  const { emoji } = groceryKind(g.name);
+  const meta = groceryMeta(g);
+  return `<li class="g-item" data-id="${g.id}">
+    <div class="g-under" aria-hidden="true">Remove</div>
+    <div class="g-card">
+      <span class="g-emoji" aria-hidden="true">${emoji}</span>
+      <button class="g-main" data-action="editGrocery" data-id="${g.id}" aria-label="Edit ${esc(g.name)}">
+        <span class="title">${esc(g.name)}</span>${meta ? `<span class="meta">${meta}</span>` : ''}</button>
+      ${g.bought ? (g.expiry ? expiryBadge(g.expiry) : `<button class="btn ghost small" data-action="addExpiry" data-id="${g.id}">＋ Expiry</button>`) : ''}
+      <button class="g-info" data-action="groceryInfo" data-id="${g.id}" aria-label="Details for ${esc(g.name)}">${INFO_ICON}</button>
+      <button class="check ${g.bought ? 'on' : ''}" data-action="toggleGrocery" data-id="${g.id}"
+        aria-label="${g.bought ? `${esc(g.name)} ran out: put back on the shopping list` : `Mark ${esc(g.name)} as bought`}">✓</button>
+    </div></li>`;
+}
+
 function renderGrocery() {
   const items = S.db.groceries;
-  const needed = items.filter((g) => !g.bought)
-    .sort((a, b) => b.addedDate.localeCompare(a.addedDate) || (b.createdAt || '').localeCompare(a.createdAt || ''));
+  const newestFirst = (a, b) => b.addedDate.localeCompare(a.addedDate) || (b.createdAt || '').localeCompare(a.createdAt || '');
+  const needed = items.filter((g) => !g.bought).sort(newestFirst);
   // In stock: soonest expiry first, then items without an expiry date (newest purchase first).
   const inStock = items.filter((g) => g.bought).sort((a, b) =>
     (a.expiry ? 0 : 1) - (b.expiry ? 0 : 1) || (a.expiry || '').localeCompare(b.expiry || '')
     || (b.boughtDate || '').localeCompare(a.boughtDate || ''));
   const expiring = expiringSoon();
-  const qty = (g) => (g.quantity ? ` <span class="muted">· ${esc(g.quantity)}</span>` : '');
-
-  const neededItem = (g) => `<li>
-    <button class="check" data-action="toggleGrocery" data-id="${g.id}" aria-label="Mark ${esc(g.name)} as bought">✓</button>
-    <div class="grow clickable" data-action="editGrocery" data-id="${g.id}" style="cursor:pointer">
-      <div class="title">${esc(g.name)}${qty(g)}</div>
-      <div class="meta">Out since ${fmtDate(g.addedDate)}${g.note ? ' · ' + esc(g.note) : ''}</div>
-      <div class="meta">${byline(g)}</div>
-    </div></li>`;
-
-  const stockItem = (g) => {
-    const buyer = g.boughtBy || g.updatedBy || g.createdBy;
-    return `<li>
-    <button class="check on" data-action="toggleGrocery" data-id="${g.id}" aria-label="${esc(g.name)} ran out: put back on the shopping list" title="Ran out? Put back on the list">✓</button>
-    <div class="grow clickable" data-action="editGrocery" data-id="${g.id}" style="cursor:pointer">
-      <div class="title">${esc(g.name)}${qty(g)}</div>
-      <div class="meta">Bought ${fmtDate(g.boughtDate)}${g.note ? ' · ' + esc(g.note) : ''}</div>
-      ${buyer ? `<div class="meta"><span class="by">${personDot(buyer)}Bought by ${esc(buyer)}</span></div>` : ''}
-    </div>
-    ${g.expiry ? expiryBadge(g.expiry) : `<button class="btn ghost small" data-action="addExpiry" data-id="${g.id}">＋ Expiry</button>`}
-    </li>`;
-  };
+  // To buy, grouped by section (Dairy & Eggs, Vegetables, …).
+  const sections = GROCERY_SECTIONS.map((sec) => [sec, needed.filter((g) => groceryKind(g.name).section === sec)]).filter(([, list]) => list.length);
 
   return `
+    <div class="g-hero">
+      <h2>Groceries</h2>
+      <span class="g-chip">${needed.length ? `🛒 ${needed.length} to buy` : '✓ All stocked'}</span>
+    </div>
     ${expiring.length ? `<div class="card alert">
       <div class="section-head"><h2>⚠️ Expiring soon<small>${expiring.length}</small></h2></div>
       <ul class="list">${expiring.map((g) => `<li class="clickable" data-action="editGrocery" data-id="${g.id}">
-        <div class="grow"><div class="title">${esc(g.name)}${qty(g)}</div>
-        <div class="meta">Expiry ${fmtDate(g.expiry)}</div></div>${expiryBadge(g.expiry)}</li>`).join('')}</ul>
-      <p class="small muted" style="margin:8px 0 0">Tap an item to change it, or remove it once it's used up or thrown away.</p>
+        <span class="g-emoji sm" aria-hidden="true">${groceryKind(g.name).emoji}</span>
+        <div class="grow"><div class="title">${esc(g.name)}</div><div class="meta">Expiry ${fmtDate(g.expiry)}</div></div>${expiryBadge(g.expiry)}</li>`).join('')}</ul>
     </div>` : ''}
-    <div class="card">
-      <form class="quick-add" id="groceryAdd">
-        <input name="name" placeholder="What ran out? e.g. Milk" required autocomplete="off" list="groceryHistory">
-        <input name="quantity" class="qty" placeholder="Qty" autocomplete="off">
-        <button class="btn primary" type="submit">Add</button>
-        <datalist id="groceryHistory">${[...new Set(items.map((g) => g.name))].map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
-      </form>
-      <p class="small muted" style="margin:8px 0 0">Today's date (${fmtDate(today())}) is saved automatically. Tick an item when it's bought.</p>
-    </div>
-    <div class="card">
-      <div class="section-head"><h2>🛒 Out of stock<small>${needed.length}</small></h2></div>
-      ${needed.length ? `<ul class="list">${needed.map(neededItem).join('')}</ul>` : '<p class="empty">Nothing needed. The pantry is stocked! 🎉</p>'}
-    </div>
-    <div class="card">
-      <div class="section-head"><h2>🏠 In stock<small>${inStock.length}</small></h2>
-        <button class="btn primary" data-action="addStock">＋ Add</button></div>
-      ${inStock.length ? `<ul class="list">${inStock.map(stockItem).join('')}</ul>
-        <p class="small muted" style="margin:8px 0 0">Ran out? Tap the tick to put it back on the shopping list.</p>`
+    <form class="g-add" id="groceryAdd">
+      <input name="name" placeholder="What ran out? e.g. Milk" required autocomplete="off" list="groceryHistory" aria-label="Item">
+      <input name="quantity" class="qty" placeholder="Qty" autocomplete="off" aria-label="Quantity">
+      <button class="g-add-btn" type="submit" aria-label="Add to list">＋</button>
+      <datalist id="groceryHistory">${[...new Set(items.map((g) => g.name))].map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
+    </form>
+    ${sections.length ? sections.map(([sec, list]) => `<section class="g-section">
+        <h3 class="g-head">${esc(sec)}</h3><ul class="g-list">${list.map(groceryItemCard).join('')}</ul></section>`).join('')
+      : '<p class="empty">Nothing to buy. The pantry is stocked! 🎉</p>'}
+    <section class="g-section g-stock">
+      <div class="g-head-row"><h3 class="g-head">🏠 In stock · ${inStock.length}</h3><button class="btn ghost small" data-action="addStock">＋ Add</button></div>
+      ${inStock.length ? `<ul class="g-list">${inStock.map(groceryItemCard).join('')}</ul>`
         : '<p class="empty">Items you tick as bought land here. Add an expiry date and you\'ll be warned the day before.</p>'}
-    </div>`;
+    </section>
+    <p class="small muted center">Swipe an item left to remove it · ⓘ shows who added it and when</p>`;
 }
+
+// ⓘ: who added it, when, and the rest of its story.
+ACTIONS.groceryInfo = (id) => {
+  const g = S.db.groceries.find((x) => x.id === id);
+  if (!g) return;
+  const { emoji, section } = groceryKind(g.name);
+  const when = (iso) => (iso ? `${new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })} · ${ago(iso)}` : '');
+  const rows = [
+    ['Added by', g.createdBy ? `${personDot(g.createdBy)} ${esc(g.createdBy)}` : '—'],
+    ['Added on', esc(when(g.createdAt))],
+    !g.bought && ['Out of stock since', esc(fmtDate(g.addedDate))],
+    g.bought && ['Bought by', (g.boughtBy || g.updatedBy) ? `${personDot(g.boughtBy || g.updatedBy)} ${esc(g.boughtBy || g.updatedBy)}` : '—'],
+    g.bought && ['Bought on', esc(fmtDate(g.boughtDate))],
+    g.expiry && ['Expires', esc(fmtDate(g.expiry))],
+    g.quantity && ['Quantity', esc(g.quantity)],
+    g.note && ['Note', esc(g.note)],
+    wasEdited(g) && ['Last changed', `${esc(g.updatedBy)} · ${esc(ago(g.updatedAt))}`],
+    ['Section', `${emoji} ${esc(section)}`],
+  ].filter(Boolean);
+  const modal = $('#modal');
+  modal.innerHTML = `<form method="dialog">
+    <div class="info-head"><span class="g-emoji lg" aria-hidden="true">${emoji}</span><h3 tabindex="-1" autofocus>${esc(g.name)}</h3></div>
+    <dl class="info-list">${rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>
+    <div class="modal-actions"><button type="button" class="btn" data-action="editGroceryFromInfo" data-id="${g.id}">Edit</button>
+      <button class="btn primary" value="close">Close</button></div>
+  </form>`;
+  modal.showModal();
+};
+ACTIONS.editGroceryFromInfo = (id) => { $('#modal').close(); ACTIONS.editGrocery(id); };
+
+// Remove with Undo (used by swipe).
+function removeGroceryWithUndo(id) {
+  const g = S.db.groceries.find((x) => x.id === id);
+  if (!g) return;
+  const { id: _, ...data } = g;
+  background(deleteDoc(doc(fdb, 'groceries', id)));
+  toastAction(`${g.name} removed`, 'Undo', () => background(setDoc(doc(fdb, 'groceries', id), data)));
+}
+
+// Swipe a grocery card left to remove it. Vertical scrolling still works (touch-action: pan-y on the card).
+let swipe = null;
+let lastSwipeEnd = 0;
+document.addEventListener('pointerdown', (e) => {
+  const card = e.target.closest('.g-card');
+  if (!card || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  swipe = { card, item: card.closest('.g-item'), x: e.clientX, y: e.clientY, dx: 0, active: false, pointer: e.pointerId };
+});
+document.addEventListener('pointermove', (e) => {
+  if (!swipe || e.pointerId !== swipe.pointer) return;
+  const dx = e.clientX - swipe.x, dy = e.clientY - swipe.y;
+  if (!swipe.active) {
+    if (dx < -10 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+      swipe.active = true;
+      swipe.item.classList.add('swiping');
+      try { swipe.card.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    } else if (Math.abs(dy) > 12 || dx > 12) { swipe = null; return; } else return;
+  }
+  swipe.dx = Math.min(0, dx);
+  swipe.card.style.transform = `translateX(${swipe.dx}px)`;
+});
+function endSwipe() {
+  if (!swipe) return;
+  const s = swipe;
+  swipe = null;
+  if (!s.active) return;
+  lastSwipeEnd = Date.now();
+  const w = s.card.offsetWidth;
+  s.card.style.transition = 'transform .18s ease';
+  if (s.dx < -w * 0.35) {
+    s.card.style.transform = `translateX(${-w - 24}px)`;
+    setTimeout(() => removeGroceryWithUndo(s.item.dataset.id), 170);
+  } else {
+    s.card.style.transform = '';
+    setTimeout(() => { s.card.style.transition = ''; s.item.classList.remove('swiping'); }, 200);
+  }
+}
+document.addEventListener('pointerup', endSwipe);
+document.addEventListener('pointercancel', endSwipe);
+// The tap that ends a swipe shouldn't also open the item.
+document.addEventListener('click', (e) => {
+  if (Date.now() - lastSwipeEnd < 400 && e.target.closest('.g-card')) { e.stopPropagation(); e.preventDefault(); }
+}, true);
 
 document.addEventListener('submit', async (e) => {
   if (e.target.id !== 'groceryAdd') return;
@@ -1805,6 +2033,7 @@ document.addEventListener('submit', async (e) => {
   const existing = S.db.groceries.find((g) => !g.bought && g.name.toLowerCase() === v.name.trim().toLowerCase());
   if (existing) { toast(`${existing.name} is already on the list`); return; }
   try {
+    e.target.reset(); // clear the boxes before the list refreshes (it keeps whatever is typed)
     await save('groceries', null, { ...v, addedDate: today() }, `${v.name.trim()} added`);
     $('#groceryAdd input[name=name]')?.focus();
   } catch (ex) { toast(ex.message); }

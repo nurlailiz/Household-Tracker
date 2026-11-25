@@ -47,6 +47,8 @@ The ⚙️ button (top right) opens a menu: **Household**, **Currency**, **Recen
 - **Copy last month's income** with one tap; the currency symbol is set in ⚙️ → **Currency**
 
 ### 🛒 Grocery
+- Items get an **emoji and a section automatically** from their name, in English or Malay (e.g. *telur* → 🥚 Dairy & Eggs, *ayam* → 🍗 Meat & Seafood, *kangkung* → 🥬 Vegetables, *pasir kucing* → 🐾 Pets). The shopping list is grouped by section; anything unknown is 🛒 Other.
+- **Swipe an item left to remove it** (with **Undo** for a few seconds). Tap **ⓘ** to see who added it and when, when it ran out or was bought (and by whom), and its expiry.
 - Type what ran out and tap **Add**. Today's date is saved automatically.
 - Tick an item when it's bought and it moves to **🏠 In stock**, showing who bought it. You can also add items straight to In stock with **＋ Add**.
 - Give an in-stock item an optional **expiry date** with **＋ Expiry**, or by tapping the item. From the day before it expires, it shows in **⚠️ Expiring soon** at the top of the Grocery tab, and a red count appears on the Grocery tab button.
