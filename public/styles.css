@@ -458,3 +458,9 @@ div.field > label > span { display: block; font-size: .85rem; color: var(--muted
 .clear-wrap input { flex: 1; min-width: 0; }
 .clear-btn { min-height: 46px; padding: 0 14px; border-radius: 10px; flex-shrink: 0; color: var(--danger); background: var(--surface-2); border-color: var(--border); font-weight: 600; }
 .clear-btn[hidden] { display: none; }
+
+/* ---------- Auto-add setup ---------- */
+.howto ol { padding-left: 20px; margin: 8px 0 12px; display: flex; flex-direction: column; gap: 10px; font-size: .92rem; }
+.howto-link { margin: 6px 0 4px; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); font-size: .8rem; line-height: 1.8; overflow-wrap: anywhere; }
+.howto-link code { font-family: ui-monospace, Menlo, monospace; }
+.howto-link .var { display: inline-block; padding: 0 8px; margin: 0 2px; border-radius: 6px; background: #3478f6; color: #fff; font-weight: 600; font-size: .78rem; line-height: 1.6; }

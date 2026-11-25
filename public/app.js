@@ -140,7 +140,7 @@ const SCHEMA = {
   weights: { catId: 'str!', date: 'str!', kg: 'num!', notes: 'str' },
   feedings: { catId: 'str!', time: 'str!', food: 'str', amount: 'str', notes: 'str' },
   events: { catId: 'str!', type: 'str!', date: 'str!', nextDue: 'str', notes: 'str' },
-  transactions: { type: 'str!', amount: 'num!', month: 'str!', date: 'str', category: 'str', description: 'str', location: 'str', person: 'str', pocket: 'str' },
+  transactions: { type: 'str!', amount: 'num!', month: 'str!', date: 'str', category: 'str', description: 'str', location: 'str', person: 'str', pocket: 'str', source: 'str' },
   groceries: { name: 'str!', quantity: 'str', note: 'str', addedDate: 'str!', bought: 'bool', boughtDate: 'str', boughtBy: 'str', expiry: 'str' },
 };
 const COLLECTIONS = Object.keys(SCHEMA);
@@ -224,7 +224,7 @@ function startSync() {
   const ready = (name) => {
     if (!waiting.size) return scheduleRender();
     waiting.delete(name);
-    if (!waiting.size) { render(); tidyCatProfiles(); tidyCategories(); }
+    if (!waiting.size) { render(); tidyCatProfiles(); tidyCategories(); processCapture(); }
   };
   const onError = (e) => {
     console.error(e);
@@ -540,6 +540,7 @@ const MENU_ICONS = {
   pockets: '<path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"></path><path d="M4 10h16"></path><path d="M15 14.5h2"></path>',
   period: '<rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M4 10h16M9 3v4M15 3v4"></path><path d="M8.5 14.5h3"></path>',
   refresh: '<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"></path><path d="M4 4v4h4"></path><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"></path><path d="M20 20v-4h-4"></path>',
+  auto: '<rect x="6" y="2.5" width="12" height="19" rx="2.5"></rect><path d="M10.5 6h3"></path><path d="M12 10v6M9 13l3 3 3-3"></path>',
   import: '<path d="M12 4v11"></path><path d="M7.5 10.5 12 15l4.5-4.5"></path><path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2"></path>',
   signout: '<path d="M14 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4"></path><path d="M10 16l-4-4 4-4"></path><path d="M6 12h10"></path>',
 };
@@ -578,6 +579,7 @@ function menuHtml() {
     ${item('activity', 'activity', 'Recent activity')}
     <button role="menuitem" class="menu-item ${refresh.fresh ? 'fresh' : ''}" data-action="forceRefresh" ${refresh.disabled ? 'disabled aria-disabled="true"' : ''}>
       ${menuIcon('refresh')}<span class="grow"><span class="menu-label">${refresh.label}</span><span class="menu-hint">${refresh.hint}</span></span></button>
+    ${item('openAutoAdd', 'auto', 'Auto-add (Apple Pay)', 'Add spending when you tap your card')}
     ${item('openImport', 'import', 'Import records')}
     <hr>
     ${item('signOut', 'signout', 'Sign out', '', 'danger')}
@@ -1509,7 +1511,7 @@ function renderMoney() {
     ${who === 'all' ? personDot(personOf(t)) : ''}
     <div class="grow"><div class="title">${esc(t.description || t.category || (t.type === 'income' ? 'Income' : 'Expense'))}</div>
     <div class="meta">${[who === 'all' ? personOf(t) : '', t.description ? t.category : '', t.location ? `at ${t.location}` : '', showDate ? fmtShort(t.date) : '',
-      showPocket(t) ? `${t.type === 'income' ? 'into' : 'from'} ${pocketOf(t)}` : ''].filter(Boolean).map(esc).join(' · ')}</div>
+      showPocket(t) ? `${t.type === 'income' ? 'into' : 'from'} ${pocketOf(t)}` : '', t.source ? `📲 ${t.source}` : ''].filter(Boolean).map(esc).join(' · ')}</div>
     </div>
     <span class="amount ${t.type}">${t.type === 'income' ? '+' : '−'}${money(t.amount)}</span></li>`;
 
@@ -1864,6 +1866,93 @@ ACTIONS.forceRefresh = async (_, btn) => {
   try { from = sessionStorage.getItem('refreshedFrom'); sessionStorage.removeItem('refreshedFrom'); } catch { /* ignore */ }
   if (from) setTimeout(() => toast(from !== APP_VERSION ? `Updated to V${APP_VERSION} 🎉` : `You're on the latest version (V${APP_VERSION})`), 600);
 })();
+
+// ============================================================
+// Auto-add from Apple Pay (iPhone Shortcuts "Transaction" automation)
+// The automation opens …/?spend=<Amount>&at=<Merchant>; the signed-in app adds it as spending
+// (Main pocket, today, best-guess category, tagged "Apple Pay"). No password lives in the Shortcut.
+// ============================================================
+const APP_URL = `${location.origin}${location.pathname}`;
+let pendingCapture = null;
+(() => {
+  const q = new URLSearchParams(location.search);
+  if (!q.has('spend')) return;
+  pendingCapture = { amount: q.get('spend') || '', merchant: q.get('at') || '', via: q.get('via') || 'Apple Pay', test: q.has('test') };
+  // Drop the details from the address so a reload or reopened tab can't add it twice.
+  window.history.replaceState(null, '', location.pathname);
+})();
+
+// "RM12.50", "RM 1,234.50", "12,50" → number
+function parseAmount(text) {
+  let t = String(text).replace(/[^\d.,]/g, '');
+  if (t.includes(',') && !t.includes('.') && /,\d{1,2}$/.test(t)) t = t.replace(',', '.');
+  return Number(t.replace(/,/g, ''));
+}
+const tidyMerchant = (m) => {
+  const t = String(m).replace(/\s+/g, ' ').trim().slice(0, 120);
+  return t && t === t.toUpperCase() ? t.toLowerCase().replace(/\b\p{L}/gu, (c) => c.toUpperCase()) : t;
+};
+const MERCHANT_CATEGORIES = [
+  [/grab|parking|park\b|petrol|shell|petronas|caltex|bhpetrol|setel|touch ?n ?go|\btng\b|toll|plus\b|mrt|lrt|ktm|rapid|uber|indrive|airasia ride/i, 'Transport & Parking'],
+  [/starbucks|coffee|kopi|caf[eé]|zus|tealive|chagee|boost juice|mcd|mcdonald|kfc|burger|pizza|domino|sushi|nasi|mamak|restoran|restaurant|food|bakery|secret recipe|subway|texas|marrybrown|dunkin|baskin|llao|mixue|foodpanda|grabfood/i, 'Food & Drinks'],
+  [/aeon|tesco|lotus|giant|mydin|jaya grocer|village grocer|speedmart|7-?eleven|7 eleven|kk ?mart|family ?mart|econsave|nsk|hero|grocer|mart\b|supermarket|hypermarket/i, 'Groceries'],
+  [/watson|guardian|pharmac|farmasi|clinic|klinik|hospital|caring|alpro|big pharmacy|dental|optical/i, 'Health'],
+  [/\bpet|petsmore|pets wonderland|vet\b|veterinar|kucing|cat food/i, 'Pets'],
+  [/tnb|tenaga|unifi|maxis|celcom|digi|u mobile|yes\b|air selangor|syabas|indah water|astro/i, 'Utilities'],
+  [/netflix|spotify|apple\.com|icloud|google|youtube|disney|viu|prime video/i, 'Bills & subscriptions'],
+  [/shopee|lazada|uniqlo|zara|h&m|ikea|mr ?diy|daiso|cotton on|padini|sephora|decathlon|harvey norman|courts/i, 'Shopping'],
+  [/cinema|gsc|tgv|mbo|bowling|karaoke|theme park/i, 'Entertainment'],
+];
+const guessCategory = (merchant) => (MERCHANT_CATEGORIES.find(([re]) => re.test(merchant)) || [null, 'Other'])[1];
+
+function processCapture() {
+  if (!pendingCapture || !S.me) return;
+  const cap = pendingCapture;
+  pendingCapture = null;
+  const amount = parseAmount(cap.amount);
+  const merchant = tidyMerchant(cap.merchant);
+  if (!(amount > 0)) { toast("Couldn't read the amount from Apple Pay, so nothing was added."); return; }
+  if (cap.test) { toast(`✅ Auto-add works! It would add ${money(amount)}${merchant ? ` · ${merchant}` : ''} (test, not saved).`); return; }
+  const date = today();
+  save('transactions', null, {
+    type: 'expense', amount, date, month: date.slice(0, 7), person: S.me, pocket: MAIN_POCKET,
+    category: guessCategory(merchant), description: merchant, source: String(cap.via).slice(0, 30) || 'Apple Pay',
+  }, `📲 Added ${money(amount)}${merchant ? ` · ${merchant}` : ''}`);
+  S.tab = 'money'; store.set('tab', 'money');
+  S.moneyWho = 'me'; S.periodOffset = 0; S.pocket = null; S.spendPocket = null;
+  render();
+}
+
+ACTIONS.openAutoAdd = fromMenu(() => {
+  const modal = $('#modal');
+  const link = `${APP_URL}?spend=`;
+  modal.innerHTML = `<form method="dialog" class="howto">
+    <h3 tabindex="-1" autofocus>📲 Auto-add from Apple Pay</h3>
+    <p class="small muted" style="margin-top:-8px">Each time you pay by tapping your card with <strong>Apple Pay</strong>, your iPhone opens Our Home and the spending is added to your <strong>Main</strong> pocket (category guessed; edit it any time). MAE QR / DuitNow payments still need ＋.</p>
+    <ol>
+      <li>Open the <strong>Shortcuts</strong> app → <strong>Automation</strong> → <strong>＋</strong> → <strong>Transaction</strong>.</li>
+      <li>Choose your card(s), keep <strong>When I tap</strong>, pick <strong>Run Immediately</strong>, then <strong>Next</strong> → <strong>New Blank Automation</strong>.</li>
+      <li>Add the action <strong>URL Encode</strong>. Tap its blue input and choose <strong>Shortcut Input</strong> → <strong>Merchant</strong>.</li>
+      <li>Add the action <strong>Text</strong> and build this line (tap <em>Copy start</em> below and paste it first):
+        <div class="howto-link"><code>${esc(link)}</code><span class="var">Amount</span><code>&amp;at=</code><span class="var">URL Encoded Text</span></div>
+        <span class="small muted">For <em>Amount</em>: tap to insert a variable → Shortcut Input → <strong>Amount</strong>.</span></li>
+      <li>Add the action <strong>Open URLs</strong> (it uses the Text automatically). Tap <strong>Done</strong>.</li>
+      <li>Open this page in <strong>Safari</strong> once and sign in there too — the automation opens Safari.</li>
+    </ol>
+    <div class="row wrap" style="gap:8px;margin:4px 0 8px">
+      <button type="button" class="btn" id="copyLink">Copy start</button>
+      <button type="button" class="btn" id="tryLink">Try it</button>
+    </div>
+    <p class="form-error" id="howtoMsg"></p>
+    <div class="modal-actions"><span class="spacer"></span><button class="btn primary" value="close">Close</button></div>
+  </form>`;
+  $('#copyLink', modal).onclick = async () => {
+    try { await navigator.clipboard.writeText(link); $('#howtoMsg', modal).textContent = 'Copied. Paste it into the Text action.'; }
+    catch { $('#howtoMsg', modal).textContent = `Copy this: ${link}`; }
+  };
+  $('#tryLink', modal).onclick = () => { location.href = `${APP_URL}?spend=RM1.00&at=TEST%20SHOP&test=1`; };
+  modal.showModal();
+});
 
 // ============================================================
 // Boot
