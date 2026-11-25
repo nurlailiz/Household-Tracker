@@ -4,7 +4,7 @@ A shared web app for two people, built on **Firebase**. You each sign in with a 
 
 ## Modules
 
-**Getting around:** tap the pill at the bottom centre (it shows the section you're in, e.g. *☰ Home*). The sections fan out above it as bubbles (🏠 Home · 🐱 Cats · 💰 Money · 🛒 Grocery, each always in the same spot); tap one to go there. Tap ✕ or the dimmed background to close. A red dot on the pill means something in Grocery is expiring soon.
+**Getting around:** tap the pill at the bottom centre (it shows the section you're in, e.g. *☰ Home*). The sections fan out above it as bubbles (🏠 Home · 🐱 Cats · 💰 Money · 📒 Budget · 🛒 Grocery, each always in the same spot); tap one to go there. Tap ✕ or the dimmed background to close. A red dot on the pill means something in Grocery is expiring soon.
 
 ### 🏠 Home
 The first screen: an overview of everything.
@@ -45,6 +45,13 @@ The ⚙️ button (top right) opens a menu: **Household**, **Currency**, **Recen
 - **Budget period** (⚙️ → **Budget period**): each of you picks the day your budget month starts, e.g. the **25th** for 25 Oct – 24 Nov, then 25 Nov – 24 Dec and so on (default: the 1st, a calendar month). Your Money tab shows your own period's dates and ‹ › moves a period at a time; **Both** and **Home** count each person in their own period. You can only change your own.
 - Each person is added to the tabs the first time they sign in. Entries from before this change belong to whoever added them.
 - **Copy last month's income** with one tap; the currency symbol is set in ⚙️ → **Currency**
+
+### 📒 Budget (private)
+Your own monthly budget, ported from *Money Diary*. **Only you can see your budget.** Your husband has his own, and neither of you can open the other's (the database rules enforce this, not just the app).
+- **Month:** balance, income, expenses and *still to pay* (with how many are paid). Tap ○ to mark an expense paid; tap a row to edit it. ＋ adds an expense: past items suggest their usual payee and amount, and *Also add to all later months* handles repeating bills. Swipe left or right to change month.
+- **Summary:** a table of every month (income, expenses, balance, to pay, running savings) with totals; tap a month to open it.
+- **More:** add the next month (copies income and fixed items, unpaid), remove the last month, download or restore a backup (Money Diary backups work too), export CSV, or reset.
+- Needs the `budgets` rule in `firestore.rules`. Paste the updated rules into Firebase once.
 
 ### 🛒 Grocery
 - Items get an **emoji and a section automatically** from their name, in English or Malay (e.g. *telur* → 🥚 Dairy & Eggs, *ayam* → 🍗 Meat & Seafood, *kangkung* → 🥬 Vegetables, *pasir kucing* → 🐾 Pets). The shopping list is grouped by section; anything unknown is 🛒 Other.

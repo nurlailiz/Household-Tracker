@@ -1,7 +1,7 @@
 rules_version = '2';
 
 // Only the two household accounts below can read or write anything.
-// Everyone else, signed in or not, is refused.
+// Everyone else, signed in or not, is refused. Each person's budget is private to them.
 //
 // >>> Replace USERNAME_1 and USERNAME_2 with your two usernames (lowercase),
 //     exactly as you created them in Firebase Authentication. <<<
@@ -19,6 +19,12 @@ service cloud.firestore {
     match /{collection}/{docId} {
       allow read, write: if isHousehold()
         && collection in ['cats', 'weights', 'feedings', 'events', 'transactions', 'groceries', 'settings'];
+    }
+
+    // Budget: private. Each person's budget lives at budgets/<their user id>,
+    // and only that person can read or change it (not even the other household member).
+    match /budgets/{uid} {
+      allow read, write: if isHousehold() && request.auth.uid == uid;
     }
   }
 }

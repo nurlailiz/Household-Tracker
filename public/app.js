@@ -286,6 +286,9 @@ function openForm({ title, fields, submitLabel = 'Save', onSubmit, onDelete, del
       return `${f.showLabel ? `<div class="field-label">${esc(f.label)}</div>` : ''}<div class="seg${f.wrap ? ' wrap' : ''}" data-seg="${f.name}" role="radiogroup" aria-label="${esc(f.label)}">${f.options.map((o) =>
         `<label><input type="radio" name="${f.name}" value="${esc(o.value)}" ${o.value === v ? 'checked' : ''}>${esc(o.label)}</label>`).join('')}</div>`;
     }
+    if (f.type === 'checkbox') {
+      return `<label class="toggle"><input type="checkbox" name="${f.name}" ${v ? 'checked' : ''}> ${esc(f.label)}</label>`;
+    }
     if (f.type === 'photo') {
       return `<div class="photo-field"><span id="photoPreview">${f.preview || ''}</span>
         <div class="row wrap"><label class="btn">Choose photo<input type="file" accept="image/*" id="photoInput" hidden></label>
@@ -363,7 +366,7 @@ function openForm({ title, fields, submitLabel = 'Save', onSubmit, onDelete, del
   form.onsubmit = async (e) => {
     e.preventDefault();
     for (const f of fields) {
-      const el = form.elements[f.name];
+      const el = form.querySelector(`[name="${f.name}"]`); // not form.elements[name]: names like "item" clash with its built-in methods
       if (f.required && !String(el?.value ?? '').trim()) {
         err.textContent = `${f.label} is required.`;
         el?.focus?.();
@@ -448,13 +451,15 @@ const TABS = [
   { id: 'home', label: 'Home', ico: '🏠' },
   { id: 'cats', label: 'Cats', ico: '🐱' },
   { id: 'money', label: 'Money', ico: '💰' },
+  { id: 'budget', label: 'Budget', ico: '📒' },
   { id: 'grocery', label: 'Grocery', ico: '🛒' },
 ];
 
 // ---------- Navigation: slide-out panel on the left, opened by the ☰ button at the bottom centre ----------
 // ---------- Navigation: tap the pill at the bottom centre and the sections fan out above it ----------
 // Each section always sits in the same spot on the arc (positions in px from the pill's centre).
-const FAN_SPOTS = [[-128, -30], [-72, -112], [72, -112], [128, -30]];
+// Spread the sections evenly over a wide arc from 176° (left) to 4° (right), 145px out.
+const FAN_SPOTS = TABS.map((_, i) => { const a = (176 - (172 / (TABS.length - 1)) * i) * Math.PI / 180; return [Math.round(145 * Math.cos(a)), Math.round(-145 * Math.sin(a))]; });
 function navHtml() {
   const current = TABS.find((t) => t.id === S.tab) || TABS[0];
   const expiring = expiringSoon().length;
@@ -493,7 +498,7 @@ function render() {
   const scroll = window.scrollY;
   const active = document.activeElement?.closest('#groceryAdd') ? document.activeElement.name : null;
   const draft = $('#groceryAdd') ? Object.fromEntries(new FormData($('#groceryAdd')).entries()) : null;
-  const body = { home: renderHome, cats: renderCats, money: renderMoney, grocery: renderGrocery }[S.tab] || renderHome;
+  const body = { home: renderHome, cats: renderCats, money: renderMoney, budget: renderBudget, grocery: renderGrocery }[S.tab] || renderHome;
   $('#app').innerHTML = `
     <header class="topbar">
       <h1><img src="./icon.svg" alt=""><span class="greeting-wrap"><span class="greeting">${greeting()}, ${esc(S.me)}</span>
@@ -2224,15 +2229,307 @@ ACTIONS.openAutoAdd = fromMenu(() => {
 });
 
 // ============================================================
+// Budget (ported from Money Diary). Private: each person's budget is one Firestore document,
+// budgets/<their uid>, which the rules let only that person read or write.
+// Shape (same as Money Diary backups): { months: { "2026-11": { income: [{id, source, amount}],
+//   expenses: [{id, item, payTo, amount, notes, paid}] } } }
+// ============================================================
+S.budget = null;
+S.budgetError = null;
+S.bView = 'month';
+S.bMonth = null;
+let budgetUnsub = null;
+
+const bId = () => Math.random().toString(36).slice(2, 10);
+const bKeys = () => Object.keys(S.budget.months).sort();
+const bLabel = (k, long) => parseDate(`${k}-01`).toLocaleDateString(undefined, { month: long ? 'long' : 'short', year: 'numeric' });
+const r2 = (n) => Math.round(n * 100) / 100;
+function budgetSeed() {
+  const months = {};
+  let k = thisMonth();
+  for (let i = 0; i < 12; i++, k = shiftMonth(k, 1)) months[k] = { income: [{ id: bId(), source: 'Salary', amount: 0 }], expenses: [] };
+  return { months };
+}
+function bTotals(k) {
+  const mo = S.budget.months[k];
+  const sum = (list) => r2(list.reduce((n, x) => n + (+x.amount || 0), 0));
+  const income = sum(mo.income), expenses = sum(mo.expenses), left = sum(mo.expenses.filter((x) => !x.paid));
+  return { income, expenses, balance: r2(income - expenses), left, paid: mo.expenses.filter((x) => x.paid).length, count: mo.expenses.length };
+}
+
+function startBudgetSync(uid) {
+  stopBudgetSync();
+  budgetUnsub = onSnapshot(doc(fdb, 'budgets', uid), (snap) => {
+    const d = snap.data();
+    S.budgetError = null;
+    if (d && d.months) S.budget = { months: d.months };
+    else if (!snap.metadata?.fromCache) { S.budget = budgetSeed(); saveBudget(); } // first time: 12 empty months
+    scheduleRender();
+  }, (e) => {
+    S.budgetError = e.code === 'permission-denied' ? 'rules' : e.message;
+    scheduleRender();
+  });
+}
+function stopBudgetSync() { budgetUnsub?.(); budgetUnsub = null; S.budget = null; S.budgetError = null; }
+function saveBudget() {
+  background(setDoc(doc(fdb, 'budgets', S.uid), { months: S.budget.months, updatedAt: new Date().toISOString() }));
+}
+
+function renderBudget() {
+  if (S.budgetError === 'rules') {
+    return `<div class="card"><div class="section-head"><h2>📒 Budget</h2></div>
+      <p>Your private budget needs a one-time update to the Firebase rules, so that only you can open it.</p>
+      <p class="small muted">Copy the new rules from <strong>firestore.rules</strong> (with your two usernames) into Firebase console → Firestore Database → Rules → Publish, then reopen the app.</p></div>`;
+  }
+  if (S.budgetError) return `<div class="card"><p class="empty">The budget couldn't load: ${esc(S.budgetError)}</p></div>`;
+  if (!S.budget) return '<div class="loading">Loading your budget…</div>';
+  const ks = bKeys();
+  if (!S.budget.months[S.bMonth]) S.bMonth = S.budget.months[thisMonth()] ? thisMonth() : ks[0];
+  const tabs = [['month', '📅 Month'], ['summary', '✨ Summary'], ['more', '⚙️ More']];
+  const head = `<div class="seg money-tabs" role="tablist">${tabs.map(([id, label]) =>
+    `<button role="tab" data-action="bView" data-id="${id}" aria-selected="${S.bView === id}">${label}</button>`).join('')}</div>
+    <p class="b-private">🔒 Only you can see your budget</p>`;
+  return head + (S.bView === 'summary' ? budgetSummary(ks) : S.bView === 'more' ? budgetMore() : budgetMonth(ks));
+}
+
+function budgetMonth(ks) {
+  const k = S.bMonth, i = ks.indexOf(k), mo = S.budget.months[k], t = bTotals(k);
+  const pct = t.expenses ? ((t.expenses - t.left) / t.expenses) * 100 : 0;
+  const exp = mo.expenses.map((x) => `<li class="clickable ${x.paid ? 'b-paid' : ''}" data-action="bEdit" data-id="exp:${x.id}">
+      <button class="check ${x.paid ? 'on' : ''}" data-action="bToggle" data-id="${x.id}" aria-label="${x.paid ? 'Mark not paid' : 'Mark paid'}: ${esc(x.item)}">✓</button>
+      <div class="grow"><div class="title">${esc(x.item)}</div>
+        ${x.payTo || x.notes ? `<div class="meta">${esc([x.payTo && `→ ${x.payTo}`, x.notes].filter(Boolean).join(' · '))}</div>` : ''}</div>
+      <span class="amount">${money(+x.amount || 0)}</span></li>`).join('');
+  const inc = mo.income.map((x) => `<li class="clickable" data-action="bEdit" data-id="inc:${x.id}">
+      <div class="grow"><div class="title">${esc(x.source)}</div></div><span class="amount income">${money(+x.amount || 0)}</span></li>`).join('');
+  return `<div class="b-month">
+    <div class="month-nav">
+      <button class="btn icon" data-action="bMonth" data-id="-1" aria-label="Previous month" ${i <= 0 ? 'disabled' : ''}>‹</button>
+      <div class="period-title"><h2>${bLabel(k, true)}</h2><p>Monthly budget</p></div>
+      <button class="btn icon" data-action="bMonth" data-id="1" aria-label="Next month" ${i >= ks.length - 1 ? 'disabled' : ''}>›</button>
+    </div>
+    <div class="b-stats">
+      <div class="stat b-wide b-balance"><span>Balance</span><strong class="amount" style="color:${t.balance < 0 ? 'var(--danger)' : 'var(--income)'}">${money(t.balance)}</strong></div>
+      <div class="stat"><span>Income</span><strong class="amount income">${money(t.income)}</strong></div>
+      <div class="stat"><span>Expenses</span><strong class="amount expense">${money(t.expenses)}</strong></div>
+      <div class="stat b-wide"><span>Still to pay · ${t.paid}/${t.count} paid</span><strong class="amount">${money(t.left)}</strong>
+        <div class="meter"><div style="width:${pct}%"></div></div></div>
+    </div>
+    <div class="card"><div class="section-head"><h2>Expenses<small>${mo.expenses.length}</small></h2><span class="small muted">tap ○ when paid</span></div>
+      ${exp ? `<ul class="list">${exp}</ul>` : '<p class="empty">No expenses yet. Tap ＋ to add one.</p>'}
+      <button class="btn ghost" data-action="bAdd" data-id="exp">＋ Add expense</button></div>
+    <div class="card"><div class="section-head"><h2>Income<small>${mo.income.length}</small></h2></div>
+      ${inc ? `<ul class="list">${inc}</ul>` : '<p class="empty">No income yet.</p>'}
+      <button class="btn ghost" data-action="bAdd" data-id="inc">＋ Add income</button></div>
+  </div>
+  <div class="fab-space" aria-hidden="true"></div>
+  <button class="fab" data-action="bAdd" data-id="exp" aria-label="Add expense">
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>`;
+}
+
+function budgetSummary(ks) {
+  const num = (n) => r2(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  let run = 0;
+  const T = { income: 0, expenses: 0, balance: 0, left: 0 };
+  const rows = ks.map((k) => {
+    const t = bTotals(k);
+    run = r2(run + t.balance);
+    T.income += t.income; T.expenses += t.expenses; T.balance += t.balance; T.left += t.left;
+    return `<tr class="clickable" data-action="bOpenMonth" data-id="${k}"><td>${bLabel(k)}</td><td>${num(t.income)}</td><td>${num(t.expenses)}</td>
+      <td class="${t.balance < 0 ? 'neg' : 'pos'}">${num(t.balance)}</td><td>${num(t.left)}</td><td class="${run < 0 ? 'neg' : ''}">${num(run)}</td></tr>`;
+  }).join('');
+  return `<div class="card"><div class="section-head"><h2>Budget summary</h2><small class="muted">${ks.length ? `${bLabel(ks[0])} – ${bLabel(ks[ks.length - 1])}` : ''}</small></div>
+    <div class="b-table"><table>
+      <thead><tr><th>Month</th><th>Income</th><th>Expenses</th><th>Balance</th><th>To pay</th><th>Savings</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><td>Total</td><td>${num(T.income)}</td><td>${num(T.expenses)}</td><td class="${T.balance < 0 ? 'neg' : 'pos'}">${num(T.balance)}</td><td>${num(T.left)}</td><td>${num(run)}</td></tr></tfoot>
+    </table></div>
+    <p class="small muted" style="margin:10px 0 0">Amounts in ${esc(S.db.settings.currency)}. Tap a month to open it. "Savings" is the running total of balances.</p></div>`;
+}
+
+function budgetMore() {
+  return `<div class="card"><div class="section-head"><h2>📆 Months</h2></div>
+      <p class="small muted" style="margin-top:0">Add the month after the last one. Income and items that are in every month so far can be copied over, all set to unpaid.</p>
+      <div class="row wrap"><button class="btn primary" data-action="bAddMonth">＋ Add next month</button>
+        <button class="btn danger" data-action="bRemoveMonth">Remove last month</button></div></div>
+    <div class="card"><div class="section-head"><h2>💾 Backup</h2></div>
+      <p class="small muted" style="margin-top:0">Your budget is saved online in your own private space. You can also keep a copy, or bring in a <strong>Money Diary</strong> backup.</p>
+      <div class="row wrap"><button class="btn" data-action="bExport">⬇️ Download backup</button>
+        <button class="btn" data-action="bImport">⬆️ Restore backup</button>
+        <button class="btn" data-action="bCsv">📄 Export CSV</button></div>
+      <input type="file" id="bFile" accept="application/json,.json" hidden></div>
+    <div class="card"><div class="section-head"><h2>Start over</h2></div>
+      <p class="small muted" style="margin-top:0">Erase your budget and start again with 12 empty months.</p>
+      <button class="btn danger" data-action="bReset">Reset my budget</button></div>`;
+}
+
+function budgetForm(type, id) {
+  const isExp = type === 'exp';
+  const ks = bKeys();
+  const mo = S.budget.months[S.bMonth];
+  const listName = isExp ? 'expenses' : 'income';
+  const x = id ? mo[listName].find((r) => r.id === id) : null;
+  const items = new Set(), payees = new Set(), sources = new Set(['Salary']);
+  for (const k of ks) {
+    for (const e of S.budget.months[k].expenses) { if (e.item) items.add(e.item); if (e.payTo) payees.add(e.payTo); }
+    for (const e of S.budget.months[k].income) if (e.source) sources.add(e.source);
+  }
+  const canRepeat = !x && ks.indexOf(S.bMonth) < ks.length - 1;
+  const amountField = { name: 'amount', label: `Amount (${S.db.settings.currency})`, type: 'number', step: '0.01', min: 0, required: true, value: x?.amount };
+  const repeat = canRepeat ? [{ name: 'repeat', label: 'Also add to all later months', type: 'checkbox' }] : [];
+  openForm({
+    title: `${x ? 'Edit' : 'Add'} ${isExp ? 'expense' : 'income'} · ${bLabel(S.bMonth)}`,
+    fields: isExp ? [
+      { name: 'item', label: 'Item', required: true, value: x?.item, suggestions: [...items] },
+      { name: 'payTo', label: 'Pay to (optional)', value: x?.payTo, suggestions: [...payees] },
+      amountField,
+      { name: 'notes', label: 'Notes (optional)', value: x?.notes },
+      { name: 'paid', label: 'Paid ✓', type: 'checkbox', value: !!x?.paid },
+      ...repeat,
+    ] : [
+      { name: 'source', label: 'Source', required: true, value: x?.source, suggestions: [...sources] },
+      amountField,
+      ...repeat,
+    ],
+    onSubmit: (v) => {
+      const amount = r2(parseFloat(v.amount) || 0);
+      const name = String(isExp ? v.item : v.source).trim();
+      const fields = isExp
+        ? { item: name, payTo: (v.payTo || '').trim(), amount, notes: (v.notes || '').trim(), paid: v.paid === 'on' }
+        : { source: name, amount };
+      if (x) {
+        Object.assign(x, fields);
+        toast('Saved');
+      } else {
+        const targets = [S.bMonth, ...(v.repeat === 'on' ? ks.filter((k) => k > S.bMonth) : [])];
+        targets.forEach((k, n) => S.budget.months[k][listName].push({ id: bId(), ...fields, ...(isExp ? { paid: n === 0 && fields.paid } : {}) }));
+        toast(targets.length > 1 ? `Saved to ${targets.length} months` : 'Saved');
+      }
+      saveBudget();
+      render();
+    },
+    onDelete: x ? () => { mo[listName] = mo[listName].filter((r) => r.id !== id); saveBudget(); render(); toast('Deleted'); } : null,
+  });
+  // Picking an item used before fills in its usual payee and amount.
+  if (isExp && !x) {
+    $('#f_item').addEventListener('change', () => {
+      const name = $('#f_item').value.trim();
+      for (const k of [...ks].reverse()) {
+        const hit = S.budget.months[k].expenses.find((e) => e.item === name);
+        if (hit) { if (!$('#f_payTo').value) $('#f_payTo').value = hit.payTo || ''; if (!$('#f_amount').value) $('#f_amount').value = hit.amount; break; }
+      }
+    });
+  }
+}
+
+ACTIONS.bView = (v) => { S.bView = v; render(); window.scrollTo(0, 0); };
+ACTIONS.bMonth = (n) => { const ks = bKeys(), k = ks[ks.indexOf(S.bMonth) + Number(n)]; if (k) { S.bMonth = k; render(); } };
+ACTIONS.bOpenMonth = (k) => { S.bMonth = k; S.bView = 'month'; render(); window.scrollTo(0, 0); };
+ACTIONS.bAdd = (type) => budgetForm(type, null);
+ACTIONS.bEdit = (ref) => { const [type, id] = ref.split(':'); budgetForm(type, id); };
+ACTIONS.bToggle = (id) => {
+  const x = S.budget.months[S.bMonth].expenses.find((r) => r.id === id);
+  if (!x) return;
+  x.paid = !x.paid;
+  saveBudget();
+  render();
+  if (x.paid) toast(`${x.item} paid ✓`);
+};
+ACTIONS.bAddMonth = () => {
+  const ks = bKeys(), last = ks[ks.length - 1], next = shiftMonth(last, 1);
+  const copy = confirm(`Add ${bLabel(next, true)}.\n\nCopy income and fixed items (items in every month so far) from ${bLabel(last)}?\n\nOK = copy · Cancel = start empty`);
+  const lastMo = S.budget.months[last];
+  const everyMonth = (name) => ks.every((k) => S.budget.months[k].expenses.some((e) => e.item === name));
+  S.budget.months[next] = copy ? {
+    income: lastMo.income.map((e) => ({ ...e, id: bId() })),
+    expenses: lastMo.expenses.filter((e) => everyMonth(e.item)).map((e) => ({ ...e, id: bId(), paid: false, notes: '' })),
+  } : { income: [{ id: bId(), source: 'Salary', amount: 0 }], expenses: [] };
+  S.bMonth = next; S.bView = 'month';
+  saveBudget(); render(); toast(`${bLabel(next)} added`);
+};
+ACTIONS.bRemoveMonth = () => {
+  const ks = bKeys();
+  if (ks.length <= 1) { toast('You need at least one month'); return; }
+  const last = ks[ks.length - 1];
+  if (!confirm(`Remove ${bLabel(last, true)} and everything in it?`)) return;
+  delete S.budget.months[last];
+  saveBudget(); render(); toast(`${bLabel(last)} removed`);
+};
+function downloadFile(name, text, type) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type }));
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+ACTIONS.bExport = () => downloadFile(`budget-backup-${today()}.json`, JSON.stringify({ currency: S.db.settings.currency, months: S.budget.months }, null, 2), 'application/json');
+ACTIONS.bCsv = () => {
+  const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const rows = [['Month', 'Type', 'Item', 'Pay to', 'Amount', 'Paid', 'Notes']];
+  for (const k of bKeys()) {
+    for (const e of S.budget.months[k].income) rows.push([bLabel(k), 'Income', e.source, '', e.amount, '', '']);
+    for (const e of S.budget.months[k].expenses) rows.push([bLabel(k), 'Expense', e.item, e.payTo, e.amount, e.paid ? 'Yes' : 'No', e.notes]);
+  }
+  downloadFile(`budget-${today()}.csv`, rows.map((r) => r.map(q).join(',')).join('\n'), 'text/csv');
+};
+ACTIONS.bImport = () => $('#bFile')?.click();
+document.addEventListener('change', async (e) => {
+  if (e.target.id !== 'bFile') return;
+  const f = e.target.files[0];
+  if (!f) return;
+  try {
+    const data = JSON.parse(await f.text());
+    if (!data || typeof data.months !== 'object') throw new Error('not a backup');
+    const months = {};
+    for (const [k, mo] of Object.entries(data.months)) {
+      if (!/^\d{4}-\d{2}$/.test(k)) continue;
+      months[k] = {
+        income: (mo.income || []).map((x) => ({ id: x.id || bId(), source: String(x.source || 'Income'), amount: r2(+x.amount || 0) })),
+        expenses: (mo.expenses || []).map((x) => ({ id: x.id || bId(), item: String(x.item || 'Expense'), payTo: String(x.payTo || ''), amount: r2(+x.amount || 0), notes: String(x.notes || ''), paid: !!x.paid })),
+      };
+    }
+    if (!Object.keys(months).length) throw new Error('no months');
+    if (!confirm(`Replace your budget with this backup (${Object.keys(months).length} months)?`)) return;
+    S.budget = { months };
+    S.bMonth = null; S.bView = 'month';
+    saveBudget(); render(); toast('Backup restored');
+  } catch {
+    toast("That file isn't a budget or Money Diary backup");
+  } finally {
+    e.target.value = '';
+  }
+});
+ACTIONS.bReset = () => {
+  if (!confirm('Erase your whole budget and start again with 12 empty months? Download a backup first if unsure.')) return;
+  S.budget = budgetSeed(); S.bMonth = null; S.bView = 'month';
+  saveBudget(); render(); toast('Budget reset');
+};
+// Swipe left/right on the month view to change month.
+let bSwipe = null;
+document.addEventListener('touchstart', (e) => {
+  bSwipe = e.target.closest('.b-month') ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
+}, { passive: true });
+document.addEventListener('touchend', (e) => {
+  if (!bSwipe) return;
+  const dx = e.changedTouches[0].clientX - bSwipe.x, dy = e.changedTouches[0].clientY - bSwipe.y;
+  bSwipe = null;
+  if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.5) ACTIONS.bMonth(dx < 0 ? 1 : -1);
+});
+
+// ============================================================
 // Boot
 // ============================================================
 onAuthStateChanged(auth, (user) => {
   if (user) {
     S.me = displayName(user);
+    S.uid = user.uid;
     $('#app').innerHTML = '<div class="loading">Loading…</div>';
     startSync();
+    startBudgetSync(user.uid);
   } else {
     stopSync();
+    stopBudgetSync();
+    S.uid = null;
     S.me = null;
     S.db = null;
     renderLogin();

@@ -13,3 +13,4 @@ A shared household app (cats, money, groceries) for two people, built as a stati
 - Run locally with `npm start` (static server on http://localhost:3000). It uses the live Firebase project.
 - Firestore rules are in `firestore.rules`. Changing them means the user must paste the rules into the Firebase console again. Avoid new collections unless needed, and tell the user if a rules change is required.
 - Keep personal data (import files, owner names, addresses) out of the repo: it's public.
+- The Budget section is private per person: one document at `budgets/<uid>`, readable and writable only by that user (see `firestore.rules`). Never show budget data to the other person, in Recent activity or anywhere else.
