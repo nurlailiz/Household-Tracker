@@ -452,33 +452,41 @@ const TABS = [
 ];
 
 // ---------- Navigation: slide-out panel on the left, opened by the ☰ button at the bottom centre ----------
+// ---------- Navigation: tap the pill at the bottom centre and the sections fan out above it ----------
+// Each section always sits in the same spot on the arc (positions in px from the pill's centre).
+const FAN_SPOTS = [[-128, -30], [-72, -112], [72, -112], [128, -30]];
 function navHtml() {
   const current = TABS.find((t) => t.id === S.tab) || TABS[0];
   const expiring = expiringSoon().length;
   return `
-    <button class="nav-fab" data-action="nav" aria-controls="drawer" aria-expanded="${S.navOpen ? 'true' : 'false'}" aria-label="Open navigation · now on ${current.label}">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
-      <span>${current.label}</span>${expiring ? '<i class="nav-dot" aria-hidden="true"></i>' : ''}
-    </button>
     <div class="scrim ${S.navOpen ? 'open' : ''}" data-action="navClose" aria-hidden="true"></div>
-    <aside id="drawer" class="drawer ${S.navOpen ? 'open' : ''}" aria-label="Navigation" ${S.navOpen ? '' : 'inert'}>
-      <div class="drawer-head"><img src="./icon.svg" alt=""><div><strong>Our Home</strong><span>${esc(S.me)}${roleOf(S.me) ? ` · ${esc(roleOf(S.me))}` : ''}</span></div></div>
-      <nav aria-label="Main">${TABS.map((t) => `<button class="drawer-item" data-tab="${t.id}" ${S.tab === t.id ? 'aria-current="page"' : ''}>
-        <span class="ico" aria-hidden="true">${t.ico}</span><span class="grow">${t.label}</span>
-        ${t.id === 'grocery' && expiring ? `<span class="tab-badge" aria-label="${expiring} expiring soon">${expiring}</span>` : ''}</button>`).join('')}</nav>
-      <p class="drawer-foot">V${APP_VERSION}</p>
-    </aside>`;
+    <nav id="fan" class="fan ${S.navOpen ? 'open' : ''}" aria-label="Sections" ${S.navOpen ? '' : 'inert'}>
+      ${TABS.map((t, i) => `<button class="fan-item ${S.tab === t.id ? 'current' : ''}" data-tab="${t.id}" ${S.tab === t.id ? 'aria-current="page"' : ''}
+          style="--x:${FAN_SPOTS[i][0]}px;--y:${FAN_SPOTS[i][1]}px;--i:${i}">
+        <span class="fan-bubble"><span aria-hidden="true">${t.ico}</span>
+          ${t.id === 'grocery' && expiring ? `<span class="tab-badge" aria-label="${expiring} expiring soon">${expiring}</span>` : ''}</span>
+        <span class="fan-label">${t.label}</span></button>`).join('')}
+    </nav>
+    <button class="nav-fab ${S.navOpen ? 'open' : ''}" data-action="nav" aria-controls="fan" aria-expanded="${S.navOpen ? 'true' : 'false'}"
+      aria-label="${S.navOpen ? 'Close sections' : `Sections · now on ${current.label}`}">
+      <svg class="ico-menu" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+      <svg class="ico-close" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+      <span>${current.label}</span>${expiring ? '<i class="nav-dot" aria-hidden="true"></i>' : ''}
+    </button>`;
 }
 
 function setNav(open) {
   S.navOpen = open;
-  $('.drawer')?.classList.toggle('open', open);
+  $('.fan')?.classList.toggle('open', open);
+  $('.fan')?.toggleAttribute('inert', !open);
   $('.scrim')?.classList.toggle('open', open);
-  $('.drawer')?.toggleAttribute('inert', !open);
-  $('.nav-fab')?.setAttribute('aria-expanded', open ? 'true' : 'false');
-  document.body.classList.toggle('nav-open', open);
-  if (open) ($('.drawer [aria-current=page]') || $('.drawer-item'))?.focus();
-  else $('.nav-fab')?.focus({ preventScroll: true });
+  const btn = $('.nav-fab');
+  if (btn) {
+    btn.classList.toggle('open', open);
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btn.setAttribute('aria-label', open ? 'Close sections' : `Sections · now on ${(TABS.find((t) => t.id === S.tab) || TABS[0]).label}`);
+  }
+  if (open) setTimeout(() => $('.fan-item.current')?.focus({ preventScroll: true }), 60);
 }
 function render() {
   if (!S.db) return;
