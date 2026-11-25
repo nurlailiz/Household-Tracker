@@ -440,6 +440,35 @@ const TABS = [
   { id: 'grocery', label: 'Grocery', ico: '🛒' },
 ];
 
+// ---------- Navigation: slide-out panel on the left, opened by the ☰ button at the bottom centre ----------
+function navHtml() {
+  const current = TABS.find((t) => t.id === S.tab) || TABS[0];
+  const expiring = expiringSoon().length;
+  return `
+    <button class="nav-fab" data-action="nav" aria-controls="drawer" aria-expanded="${S.navOpen ? 'true' : 'false'}" aria-label="Open navigation · now on ${current.label}">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+      <span>${current.label}</span>${expiring ? '<i class="nav-dot" aria-hidden="true"></i>' : ''}
+    </button>
+    <div class="scrim ${S.navOpen ? 'open' : ''}" data-action="navClose" aria-hidden="true"></div>
+    <aside id="drawer" class="drawer ${S.navOpen ? 'open' : ''}" aria-label="Navigation" ${S.navOpen ? '' : 'inert'}>
+      <div class="drawer-head"><img src="./icon.svg" alt=""><div><strong>Our Home</strong><span>${esc(S.me)}${roleOf(S.me) ? ` · ${esc(roleOf(S.me))}` : ''}</span></div></div>
+      <nav aria-label="Main">${TABS.map((t) => `<button class="drawer-item" data-tab="${t.id}" ${S.tab === t.id ? 'aria-current="page"' : ''}>
+        <span class="ico" aria-hidden="true">${t.ico}</span><span class="grow">${t.label}</span>
+        ${t.id === 'grocery' && expiring ? `<span class="tab-badge" aria-label="${expiring} expiring soon">${expiring}</span>` : ''}</button>`).join('')}</nav>
+      <p class="drawer-foot">V${APP_VERSION}</p>
+    </aside>`;
+}
+
+function setNav(open) {
+  S.navOpen = open;
+  $('.drawer')?.classList.toggle('open', open);
+  $('.scrim')?.classList.toggle('open', open);
+  $('.drawer')?.toggleAttribute('inert', !open);
+  $('.nav-fab')?.setAttribute('aria-expanded', open ? 'true' : 'false');
+  document.body.classList.toggle('nav-open', open);
+  if (open) ($('.drawer [aria-current=page]') || $('.drawer-item'))?.focus();
+  else $('.nav-fab')?.focus({ preventScroll: true });
+}
 function render() {
   if (!S.db) return;
   const scroll = window.scrollY;
@@ -455,10 +484,8 @@ function render() {
         ${S.menuOpen ? menuHtml() : ''}
       </div>
     </header>
-    <nav class="tabs">${TABS.map((t) => `<button data-tab="${t.id}" ${S.tab === t.id ? 'aria-current="page"' : ''}>
-      ${t.id === 'grocery' && expiringSoon().length ? `<span class="tab-badge" aria-label="${expiringSoon().length} expiring soon">${expiringSoon().length}</span>` : ''}
-      <span class="ico" aria-hidden="true">${t.ico}</span>${t.label}</button>`).join('')}</nav>
-    <main>${body()}${versionTag}</main>`;
+    <main>${body()}${versionTag}</main>
+    ${navHtml()}`;
   if (draft && $('#groceryAdd')) {
     for (const [k, v] of Object.entries(draft)) $('#groceryAdd').elements[k].value = v;
     if (active) $('#groceryAdd').elements[active].focus();
@@ -472,6 +499,8 @@ document.addEventListener('click', (e) => {
   if (tab) {
     S.tab = tab.dataset.tab;
     store.set('tab', S.tab);
+    S.navOpen = false;
+    document.body.classList.remove('nav-open');
     render();
     window.scrollTo(0, 0);
     return;
@@ -496,11 +525,14 @@ document.addEventListener('touchend', (e) => {
 document.addEventListener('dblclick', (e) => { if (!e.target.closest?.('input, textarea, [contenteditable]')) e.preventDefault(); });
 
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && S.navOpen) { setNav(false); return; }
   if (e.key === 'Escape' && S.menuOpen) { S.menuOpen = false; render(); $('[data-action=menu]')?.focus(); return; }
   if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role=button][data-action]')) { e.preventDefault(); e.target.click(); }
 });
 
 const ACTIONS = {};
+ACTIONS.nav = () => setNav(!S.navOpen);
+ACTIONS.navClose = () => setNav(false);
 
 // ---------- Household roles ----------
 // Each person sets their own role (the app only lets you change yours). Cats are always "Cat".

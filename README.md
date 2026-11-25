@@ -4,6 +4,8 @@ A shared web app for two people, built on **Firebase**. You each sign in with a 
 
 ## Modules
 
+**Getting around:** tap the **☰** button at the bottom centre (it shows the section you're in, e.g. *☰ Money*) to slide out the menu on the left: **Home · Cats · Money · Grocery**. A red dot on ☰ means something in Grocery is expiring soon.
+
 ### 🏠 Home
 The first screen: an overview of everything.
 - **🐾 Cats · next up:** the next five cat dates (vet visits, vaccines, deworm, weigh-ins…). Tap one to open that cat.
