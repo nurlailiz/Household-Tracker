@@ -2244,6 +2244,16 @@ const bId = () => Math.random().toString(36).slice(2, 10);
 const bKeys = () => Object.keys(S.budget.months).sort();
 const bLabel = (k, long) => parseDate(`${k}-01`).toLocaleDateString(undefined, { month: long ? 'long' : 'short', year: 'numeric' });
 const r2 = (n) => Math.round(n * 100) / 100;
+const B_MAX_REPEAT = 60;
+// The n months after k, e.g. bRepeatMonths('2026-12', 3) → 2027-01, 2027-02, 2027-03.
+const bRepeatMonths = (k, n) => Array.from({ length: n }, (_, i) => shiftMonth(k, i + 1));
+const bHasItem = (k, name) => (S.budget.months[k]?.expenses || []).some((e) => e.item.trim().toLowerCase() === name.toLowerCase());
+// A new empty month, carrying over the estimated income of the latest month before it.
+function bNewMonth(k) {
+  const prev = k && Object.keys(S.budget.months).filter((m) => m < k).sort().pop();
+  const est = prev ? S.budget.months[prev].estimate : 0;
+  return { income: [], expenses: [], ...(est ? { estimate: est } : {}) };
+}
 function budgetSeed() {
   const months = {};
   let k = currentBudgetKey();
@@ -2425,9 +2435,17 @@ function budgetForm(type, id) {
     for (const e of S.budget.months[k].expenses) { if (e.item) items.add(e.item); if (e.payTo) payees.add(e.payTo); }
     for (const e of S.budget.months[k].income) if (e.source) sources.add(e.source);
   }
-  const canRepeat = !x && ks.indexOf(S.bMonth) < ks.length - 1;
   const amountField = { name: 'amount', label: `Amount (${S.db.settings.currency})`, type: 'number', step: '0.01', min: 0, required: true, value: x?.amount };
-  const repeat = canRepeat ? [{ name: 'repeat', label: 'Also add to all later months', type: 'checkbox' }] : [];
+  // Expenses can repeat in the months after this one (e.g. a loan with 6 payments left).
+  // Months that don't exist yet are added; months that already have the same item are skipped.
+  const later = ks.filter((k) => k > S.bMonth);
+  const repeatHtml = isExp ? `<div class="b-repeat">
+      <label class="b-rep-row" for="bRepN"><span>${x ? 'Copy to' : 'Repeat for'}</span>
+        <input id="bRepN" name="repeatN" type="number" min="0" max="${B_MAX_REPEAT}" step="1" inputmode="numeric" placeholder="0">
+        <span>more months</span></label>
+      <div class="chip-filter b-rep-chips">${[3, 6, 12].map((n) => `<button type="button" class="filter-chip" data-rep="${n}" aria-pressed="false">${n}</button>`).join('')}
+        ${later.length ? `<button type="button" class="filter-chip" data-rep="${later.length}" aria-pressed="false">All later (${later.length})</button>` : ''}</div>
+      <p class="small muted b-rep-hint" id="bRepHint"></p></div>` : '';
   openForm({
     title: `${x ? 'Edit' : 'Add'} ${isExp ? 'expense' : 'income'} · ${bLabel(S.bMonth)}`,
     fields: isExp ? [
@@ -2436,31 +2454,58 @@ function budgetForm(type, id) {
       amountField,
       { name: 'notes', label: 'Notes (optional)', value: x?.notes },
       { name: 'paid', label: 'Paid ✓', type: 'checkbox', value: !!x?.paid },
-      ...repeat,
     ] : [
       { name: 'source', label: 'Source', required: true, value: x?.source, suggestions: [...sources] },
       amountField,
-      ...repeat,
     ],
+    footer: repeatHtml,
     onSubmit: (v) => {
       const amount = r2(parseFloat(v.amount) || 0);
       const name = String(isExp ? v.item : v.source).trim();
+      const n = Math.floor(+v.repeatN || 0);
+      if (n < 0 || n > B_MAX_REPEAT) throw new Error(`Repeat for 0 to ${B_MAX_REPEAT} months at a time.`);
       const fields = isExp
         ? { item: name, payTo: (v.payTo || '').trim(), amount, notes: (v.notes || '').trim(), paid: v.paid === 'on' }
         : { source: name, amount };
-      if (x) {
-        Object.assign(x, fields);
-        toast('Saved');
-      } else {
-        const targets = [S.bMonth, ...(v.repeat === 'on' ? ks.filter((k) => k > S.bMonth) : [])];
-        targets.forEach((k, n) => S.budget.months[k][listName].push({ id: bId(), ...fields, ...(isExp ? { paid: n === 0 && fields.paid } : {}) }));
-        toast(targets.length > 1 ? `Saved to ${targets.length} months` : 'Saved');
+      if (x) Object.assign(x, fields);
+      else mo[listName].push({ id: bId(), ...fields });
+      let added = 0, skipped = 0;
+      if (isExp && n > 0) {
+        for (const k of bRepeatMonths(S.bMonth, n)) {
+          if (!S.budget.months[k]) S.budget.months[k] = bNewMonth(k);
+          if (bHasItem(k, name)) { skipped++; continue; }
+          S.budget.months[k].expenses.push({ id: bId(), ...fields, paid: false });
+          added++;
+        }
       }
+      const extra = n > 0 ? `${x ? ' · copied to' : ' to'} ${x ? added : added + 1} month${(x ? added : added + 1) === 1 ? '' : 's'}${skipped ? ` (${skipped} already had it)` : ''}` : '';
+      toast(`Saved${extra}`);
       saveBudget();
       render();
     },
     onDelete: x ? () => { mo[listName] = mo[listName].filter((r) => r.id !== id); saveBudget(); render(); toast('Deleted'); } : null,
   });
+  if (isExp) {
+    const rep = $('#bRepN'), hint = $('#bRepHint');
+    const update = () => {
+      const n = Math.floor(+rep.value || 0);
+      document.querySelectorAll('[data-rep]').forEach((b) => b.setAttribute('aria-pressed', String(+b.dataset.rep === n && n > 0)));
+      if (n <= 0) { hint.textContent = x ? 'Leave at 0 to change this month only.' : `Only ${bLabel(S.bMonth, true)}.`; return; }
+      if (n > B_MAX_REPEAT) { hint.textContent = `Up to ${B_MAX_REPEAT} months at a time.`; return; }
+      const t = bRepeatMonths(S.bMonth, n);
+      const fresh = t.filter((k) => !S.budget.months[k]).length;
+      const name = $('#f_item').value.trim();
+      const have = name ? t.filter((k) => bHasItem(k, name)).length : 0;
+      const span = `${bLabel(t[0])}${t.length > 1 ? ` – ${bLabel(t[t.length - 1])}` : ''}`;
+      hint.textContent = (x ? `Copies to ${span}` : `${bLabel(S.bMonth)}, then ${span} · ${n + 1} months in all`)
+        + (fresh ? ` · adds ${fresh} new month${fresh === 1 ? '' : 's'} to your budget` : '')
+        + (have ? ` · ${have} already ${have === 1 ? 'has' : 'have'} it and will be skipped` : '');
+    };
+    document.querySelectorAll('[data-rep]').forEach((b) => b.addEventListener('click', () => { rep.value = b.getAttribute('aria-pressed') === 'true' ? '' : b.dataset.rep; update(); }));
+    rep.addEventListener('input', update);
+    $('#f_item').addEventListener('input', update);
+    update();
+  }
   // Picking an item used before fills in its usual payee and amount.
   if (isExp && !x) {
     $('#f_item').addEventListener('change', () => {
