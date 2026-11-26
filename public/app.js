@@ -2436,15 +2436,15 @@ function budgetForm(type, id) {
     for (const e of S.budget.months[k].income) if (e.source) sources.add(e.source);
   }
   const amountField = { name: 'amount', label: `Amount (${S.db.settings.currency})`, type: 'number', step: '0.01', min: 0, required: true, value: x?.amount };
-  // Expenses can repeat in the months after this one (e.g. a loan with 6 payments left).
-  // Months that don't exist yet are added; months that already have the same item are skipped.
+  // Installments: an expense can run for N months, counting this one (e.g. a loan with 6 payments
+  // left = 6). Months that don't exist yet are added; months that already have the item are skipped.
   const later = ks.filter((k) => k > S.bMonth);
   const repeatHtml = isExp ? `<div class="b-repeat">
-      <label class="b-rep-row" for="bRepN"><span>${x ? 'Copy to' : 'Repeat for'}</span>
-        <input id="bRepN" name="repeatN" type="number" min="0" max="${B_MAX_REPEAT}" step="1" inputmode="numeric" placeholder="0">
-        <span>more months</span></label>
+      <label class="b-rep-row" for="bRepN"><span>Installment</span>
+        <input id="bRepN" name="repeatN" type="number" min="1" max="${B_MAX_REPEAT}" step="1" inputmode="numeric" placeholder="1">
+        <span>months</span></label>
       <div class="chip-filter b-rep-chips">${[3, 6, 12].map((n) => `<button type="button" class="filter-chip" data-rep="${n}" aria-pressed="false">${n}</button>`).join('')}
-        ${later.length ? `<button type="button" class="filter-chip" data-rep="${later.length}" aria-pressed="false">All later (${later.length})</button>` : ''}</div>
+        ${later.length ? `<button type="button" class="filter-chip" data-rep="${later.length + 1}" aria-pressed="false">Until ${bLabel(later[later.length - 1])}</button>` : ''}</div>
       <p class="small muted b-rep-hint" id="bRepHint"></p></div>` : '';
   openForm({
     title: `${x ? 'Edit' : 'Add'} ${isExp ? 'expense' : 'income'} · ${bLabel(S.bMonth)}`,
@@ -2462,24 +2462,24 @@ function budgetForm(type, id) {
     onSubmit: (v) => {
       const amount = r2(parseFloat(v.amount) || 0);
       const name = String(isExp ? v.item : v.source).trim();
-      const n = Math.floor(+v.repeatN || 0);
-      if (n < 0 || n > B_MAX_REPEAT) throw new Error(`Repeat for 0 to ${B_MAX_REPEAT} months at a time.`);
+      const months = Math.floor(+v.repeatN || 1); // installment length, this month included
+      if (months < 1 || months > B_MAX_REPEAT) throw new Error(`Installment can be 1 to ${B_MAX_REPEAT} months.`);
       const fields = isExp
         ? { item: name, payTo: (v.payTo || '').trim(), amount, notes: (v.notes || '').trim(), paid: v.paid === 'on' }
         : { source: name, amount };
       if (x) Object.assign(x, fields);
       else mo[listName].push({ id: bId(), ...fields });
-      let added = 0, skipped = 0;
-      if (isExp && n > 0) {
-        for (const k of bRepeatMonths(S.bMonth, n)) {
+      let skipped = 0;
+      if (isExp && months > 1) {
+        for (const k of bRepeatMonths(S.bMonth, months - 1)) {
           if (!S.budget.months[k]) S.budget.months[k] = bNewMonth(k);
           if (bHasItem(k, name)) { skipped++; continue; }
           S.budget.months[k].expenses.push({ id: bId(), ...fields, paid: false });
-          added++;
         }
       }
-      const extra = n > 0 ? `${x ? ' · copied to' : ' to'} ${x ? added : added + 1} month${(x ? added : added + 1) === 1 ? '' : 's'}${skipped ? ` (${skipped} already had it)` : ''}` : '';
-      toast(`Saved${extra}`);
+      toast(months > 1
+        ? `Saved for ${bLabel(S.bMonth)} – ${bLabel(shiftMonth(S.bMonth, months - 1))} (${months} months)${skipped ? ` · ${skipped} already had it` : ''}`
+        : 'Saved');
       saveBudget();
       render();
     },
@@ -2488,16 +2488,15 @@ function budgetForm(type, id) {
   if (isExp) {
     const rep = $('#bRepN'), hint = $('#bRepHint');
     const update = () => {
-      const n = Math.floor(+rep.value || 0);
-      document.querySelectorAll('[data-rep]').forEach((b) => b.setAttribute('aria-pressed', String(+b.dataset.rep === n && n > 0)));
-      if (n <= 0) { hint.textContent = x ? 'Leave at 0 to change this month only.' : `Only ${bLabel(S.bMonth, true)}.`; return; }
-      if (n > B_MAX_REPEAT) { hint.textContent = `Up to ${B_MAX_REPEAT} months at a time.`; return; }
-      const t = bRepeatMonths(S.bMonth, n);
+      const n = Math.floor(+rep.value || 1);
+      document.querySelectorAll('[data-rep]').forEach((b) => b.setAttribute('aria-pressed', String(+b.dataset.rep === n && n > 1)));
+      if (n <= 1) { hint.textContent = `Just ${bLabel(S.bMonth, true)}. For an installment, enter how many months it runs, counting this one.`; return; }
+      if (n > B_MAX_REPEAT) { hint.textContent = `Up to ${B_MAX_REPEAT} months.`; return; }
+      const t = bRepeatMonths(S.bMonth, n - 1);
       const fresh = t.filter((k) => !S.budget.months[k]).length;
       const name = $('#f_item').value.trim();
       const have = name ? t.filter((k) => bHasItem(k, name)).length : 0;
-      const span = `${bLabel(t[0])}${t.length > 1 ? ` – ${bLabel(t[t.length - 1])}` : ''}`;
-      hint.textContent = (x ? `Copies to ${span}` : `${bLabel(S.bMonth)}, then ${span} · ${n + 1} months in all`)
+      hint.textContent = `${bLabel(S.bMonth)} – ${bLabel(t[t.length - 1])} · ${n} months`
         + (fresh ? ` · adds ${fresh} new month${fresh === 1 ? '' : 's'} to your budget` : '')
         + (have ? ` · ${have} already ${have === 1 ? 'has' : 'have'} it and will be skipped` : '');
     };
