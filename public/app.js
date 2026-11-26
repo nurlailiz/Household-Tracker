@@ -450,7 +450,7 @@ function renderLogin(message = '') {
 const TABS = [
   { id: 'home', label: 'Home', ico: '🏠' },
   { id: 'cats', label: 'Cats', ico: '🐱' },
-  { id: 'money', label: 'Money', ico: '💰' },
+  { id: 'money', label: 'Spending', ico: '💸' },
   { id: 'budget', label: 'Budget', ico: '📒' },
   { id: 'grocery', label: 'Grocery', ico: '🛒' },
 ];
@@ -680,7 +680,7 @@ ACTIONS.openPeriod = fromMenu(() => {
   const preview = (d) => `Your current period: <strong>${fmtRange(periodRange(d, currentPeriodKey(d)))}</strong>`;
   openForm({
     title: 'Budget period',
-    meta: `<p class="small muted" style="margin:-6px 0 14px">Pick the day your budget month starts, e.g. the day your salary comes in. Each of you sets your own; Money and Home use it.</p>
+    meta: `<p class="small muted" style="margin:-6px 0 14px">Pick the day your budget month starts, e.g. the day your salary comes in. Each of you sets your own; Spending, Budget and Home use it.</p>
       ${others.map((p) => `<p class="small" style="margin:0 0 12px">${personDot(p)} <strong>${esc(p)}</strong>: ${periodStartDay(p) > 1 ? `starts on the ${ordinal(periodStartDay(p))}` : 'calendar month'} <span class="muted">· ${fmtRange(periodOf(p, 0))} · only ${esc(p)} can change this</span></p>`).join('')}`,
     fields: [{
       name: 'periodDay', label: `Your budget month starts on (${S.me})`, type: 'select', value: String(mine),
@@ -865,7 +865,7 @@ function renderHome() {
   </div>`;
 
   const moneyCard = `<div class="card">
-    <div class="section-head"><h2>💰 This budget period</h2>${more('money')}</div>
+    <div class="section-head"><h2>💸 This budget period</h2>${more('money')}</div>
     ${people().map((p) => personBalance(p, 0)).join('')}
   </div>`;
 
@@ -903,7 +903,7 @@ ACTIONS.openCat = (id) => {
 // ============================================================
 // Recent activity (both of you, all modules)
 // ============================================================
-const MODULE_ICONS = { cats: '🐱', weights: '⚖️', feedings: '🍽️', events: '📅', transactions: '💰', groceries: '🛒' };
+const MODULE_ICONS = { cats: '🐱', weights: '⚖️', feedings: '🍽️', events: '📅', transactions: '💸', groceries: '🛒' };
 
 function describe(col, x) {
   const catName = (id) => S.db.cats.find((c) => c.id === id)?.name || 'a cat';
@@ -1575,9 +1575,9 @@ function renderMoney() {
   const prevIncome = periodTotals(who, S.periodOffset - 1).tx.filter((t) => t.type === 'income');
   // Heading: the exact dates for one person; for Both, the month name (each of you in your own period).
   const range = who === 'all' ? null : ranges[who];
-  const heading = range ? fmtRange(range) : fmtMonth(periodOf(S.me).key);
+  const heading = range ? fmtRange(range) : fmtMonth(periodOf(S.me).start.slice(0, 7));
   const subheading = range
-    ? (range.day > 1 ? `Budget month starts on the ${ordinal(range.day)}` : 'Calendar month')
+    ? (range.day > 1 ? `${fmtMonth(range.start.slice(0, 7))} budget · starts on the ${ordinal(range.day)}` : 'Calendar month')
     : 'Each of you in your own budget period';
   const tabs = [...people(), 'all'];
   const whose = who === 'all' ? 'Both of you' : who === S.me ? 'Your' : `${who}'s`;
@@ -2250,27 +2250,32 @@ function budgetSeed() {
   for (let i = 0; i < 12; i++, k = shiftMonth(k, 1)) months[k] = { income: [], expenses: [] };
   return { months };
 }
-// Income for a budget month comes from Money: your income entries in the matching budget period
-// (Budget's "November" = Money's period that ends in November, e.g. 25 Oct – 24 Nov).
-// Income typed into Budget before syncing is only counted for months with no Money income,
-// so older history still shows and nothing is counted twice.
-const budgetRange = (k) => periodRange(periodStartDay(S.me), k);
+// Income for a budget month comes from Spending: your income entries in the matching budget period.
+// Budget's "November" = the Spending period that STARTS in November (e.g. 25 Nov – 24 Dec);
+// with a calendar month it's simply 1–30 Nov.
+// Income typed into Budget before syncing is only counted for months with no Spending income,
+// so older history still shows and nothing is counted twice. Until real income arrives, an
+// estimated income (set in Budget) is used so you can plan ahead.
+const budgetRange = (k) => { const day = periodStartDay(S.me); return periodRange(day, day > 1 ? shiftMonth(k, 1) : k); };
 function budgetIncome(k) {
   const r = budgetRange(k);
   const fromMoney = S.db.transactions.filter((t) => t.type === 'income' && personOf(t) === S.me && inRange(txDate(t), r))
     .sort((a, b) => txDate(b).localeCompare(txDate(a)) || (b.createdAt || '').localeCompare(a.createdAt || ''));
   const budgetOnly = fromMoney.length ? [] : (S.budget.months[k]?.income || []).filter((x) => +x.amount > 0);
   const total = r2(fromMoney.reduce((n, t) => n + t.amount, 0) + budgetOnly.reduce((n, x) => n + (+x.amount || 0), 0));
-  return { fromMoney, budgetOnly, total };
+  const estimate = r2(+S.budget.months[k]?.estimate || 0);
+  const estimated = total <= 0 && estimate > 0;
+  return { fromMoney, budgetOnly, total, estimate, estimated, effective: estimated ? estimate : total };
 }
-// The budget month you're in now, following your Money budget period.
-const currentBudgetKey = () => currentPeriodKey(periodStartDay(S.me));
+// The budget month you're in now: the month your current Spending period started in.
+const currentBudgetKey = () => { const day = periodStartDay(S.me), k = currentPeriodKey(day); return day > 1 ? shiftMonth(k, -1) : k; };
 
 function bTotals(k) {
   const mo = S.budget.months[k];
   const sum = (list) => r2(list.reduce((n, x) => n + (+x.amount || 0), 0));
-  const income = budgetIncome(k).total, expenses = sum(mo.expenses), left = sum(mo.expenses.filter((x) => !x.paid));
-  return { income, expenses, balance: r2(income - expenses), left, paid: mo.expenses.filter((x) => x.paid).length, count: mo.expenses.length };
+  const bi = budgetIncome(k);
+  const income = bi.effective, expenses = sum(mo.expenses), left = sum(mo.expenses.filter((x) => !x.paid));
+  return { income, estimated: bi.estimated, expenses, balance: r2(income - expenses), left, paid: mo.expenses.filter((x) => x.paid).length, count: mo.expenses.length };
 }
 
 function startBudgetSync(uid) {
@@ -2286,7 +2291,7 @@ function startBudgetSync(uid) {
     scheduleRender();
   });
 }
-function stopBudgetSync() { budgetUnsub?.(); budgetUnsub = null; S.budget = null; S.budgetError = null; S.budgetMissing = false; }
+function stopBudgetSync() { budgetUnsub?.(); budgetUnsub = null; S.budget = null; S.budgetError = null; S.budgetMissing = false; S.bMonth = null; S.bView = 'month'; }
 function saveBudget() {
   background(setDoc(doc(fdb, 'budgets', S.uid), { months: S.budget.months, updatedAt: new Date().toISOString() }));
 }
@@ -2301,8 +2306,14 @@ function renderBudget() {
   if (!S.budget && S.budgetMissing) { S.budget = budgetSeed(); S.budgetMissing = false; saveBudget(); }
   if (!S.budget) return '<div class="loading">Loading your budget…</div>';
   const ks = bKeys();
+  const nowKey = currentBudgetKey();
+  if (ks.length && nowKey < ks[0]) {
+    for (let m = nowKey, n = 0; m < ks[0] && n < 12; m = shiftMonth(m, 1), n++) S.budget.months[m] = { income: [], expenses: [] };
+    saveBudget();
+    ks.splice(0, ks.length, ...bKeys());
+  }
   if (!S.budget.months[S.bMonth]) {
-    const now = currentBudgetKey();
+    const now = nowKey;
     S.bMonth = S.budget.months[now] ? now : ([...ks].reverse().find((k) => k <= now) || ks[0]);
   }
   const tabs = [['month', '📅 Month'], ['summary', '✨ Summary'], ['more', '⚙️ More']];
@@ -2321,6 +2332,17 @@ function budgetMonth(ks) {
         ${x.payTo || x.notes ? `<div class="meta">${esc([x.payTo && `→ ${x.payTo}`, x.notes].filter(Boolean).join(' · '))}</div>` : ''}</div>
       <span class="amount">${money(+x.amount || 0)}</span></li>`).join('');
   const bi = budgetIncome(k);
+  const diff = r2(bi.total - bi.estimate);
+  const estimateHtml = bi.estimated
+    ? `<ul class="list b-estimate"><li class="clickable" data-action="bEstimate">
+        <span class="b-est-ico" aria-hidden="true">≈</span><div class="grow"><div class="title">Estimated income</div>
+        <div class="meta">Used until your income for ${bLabel(k, true).split(' ')[0]} is added in Spending</div></div>
+        <span class="amount income">≈ ${money(bi.estimate)}</span></li></ul>`
+    : bi.estimate > 0 && bi.total > 0
+      ? `<p class="small muted b-est-note">Estimated ${money(bi.estimate)} · actual ${money(bi.total)}
+          <span class="badge ${diff >= 0 ? 'ok' : 'warn'}">${diff >= 0 ? '+' : '−'}${money(Math.abs(diff))}</span>
+          <button class="btn ghost small" data-action="bEstimate">Edit</button></p>`
+      : '';
   const inc = bi.fromMoney.map((x) => `<li class="clickable" data-action="editTx" data-id="${x.id}">
       <div class="grow"><div class="title">${esc(x.description || x.category || 'Income')}</div>
         <div class="meta">${esc([x.description ? x.category : '', fmtShort(txDate(x)), pocketsOf(S.me).length > 1 ? `into ${pocketOf(x)}` : ''].filter(Boolean).join(' · '))}</div></div>
@@ -2336,7 +2358,7 @@ function budgetMonth(ks) {
     </div>
     <div class="b-stats">
       <div class="stat b-wide b-balance"><span>Balance</span><strong class="amount" style="color:${t.balance < 0 ? 'var(--danger)' : 'var(--income)'}">${money(t.balance)}</strong></div>
-      <div class="stat"><span>Income</span><strong class="amount income">${money(t.income)}</strong></div>
+      <div class="stat"><span>${t.estimated ? 'Income (estimated)' : 'Income'}</span><strong class="amount income">${t.estimated ? '≈ ' : ''}${money(t.income)}</strong></div>
       <div class="stat"><span>Expenses</span><strong class="amount expense">${money(t.expenses)}</strong></div>
       <div class="stat b-wide"><span>Still to pay · ${t.paid}/${t.count} paid</span><strong class="amount">${money(t.left)}</strong>
         <div class="meter"><div style="width:${pct}%"></div></div></div>
@@ -2344,10 +2366,12 @@ function budgetMonth(ks) {
     <div class="card"><div class="section-head"><h2>Expenses<small>${mo.expenses.length}</small></h2><span class="small muted">tap ○ when paid</span></div>
       ${exp ? `<ul class="list">${exp}</ul>` : '<p class="empty">No expenses yet. Tap ＋ to add one.</p>'}
       <button class="btn ghost" data-action="bAdd" data-id="exp">＋ Add expense</button></div>
-    <div class="card"><div class="section-head"><h2>Income<small>${bi.fromMoney.length + bi.budgetOnly.length}</small></h2><span class="small muted">from 💰 Money</span></div>
-      ${inc ? `<ul class="list">${inc}</ul>` : '<p class="empty">No income in Money for this month yet.</p>'}
-      <button class="btn ghost" data-action="bAddIncome">＋ Add income</button>
-      <p class="small muted" style="margin:6px 0 0">Income you add in Money shows here automatically, and income added here goes into Money.</p></div>
+    <div class="card"><div class="section-head"><h2>Income<small>${bi.fromMoney.length + bi.budgetOnly.length}</small></h2><span class="small muted">from 💸 Spending</span></div>
+      ${estimateHtml}
+      ${inc ? `<ul class="list">${inc}</ul>` : '<p class="empty">No income in Spending for this month yet.</p>'}
+      <div class="row wrap"><button class="btn ghost" data-action="bAddIncome">＋ Add income</button>
+        ${bi.estimate > 0 ? '' : '<button class="btn ghost" data-action="bEstimate">≈ Set estimated income</button>'}</div>
+      <p class="small muted" style="margin:6px 0 0">Income you add in Spending shows here automatically, and income added here goes into Spending.</p></div>
   </div>
   <div class="fab-space" aria-hidden="true"></div>
   <button class="fab" data-action="bAdd" data-id="exp" aria-label="Add expense">
@@ -2362,7 +2386,7 @@ function budgetSummary(ks) {
     const t = bTotals(k);
     run = r2(run + t.balance);
     T.income += t.income; T.expenses += t.expenses; T.balance += t.balance; T.left += t.left;
-    return `<tr class="clickable" data-action="bOpenMonth" data-id="${k}"><td>${bLabel(k)}</td><td>${num(t.income)}</td><td>${num(t.expenses)}</td>
+    return `<tr class="clickable" data-action="bOpenMonth" data-id="${k}"><td>${bLabel(k)}</td><td>${t.estimated ? '≈ ' : ''}${num(t.income)}</td><td>${num(t.expenses)}</td>
       <td class="${t.balance < 0 ? 'neg' : 'pos'}">${num(t.balance)}</td><td>${num(t.left)}</td><td class="${run < 0 ? 'neg' : ''}">${num(run)}</td></tr>`;
   }).join('');
   return `<div class="card"><div class="section-head"><h2>Budget summary</h2><small class="muted">${ks.length ? `${bLabel(ks[0])} – ${bLabel(ks[ks.length - 1])}` : ''}</small></div>
@@ -2371,12 +2395,12 @@ function budgetSummary(ks) {
       <tbody>${rows}</tbody>
       <tfoot><tr><td>Total</td><td>${num(T.income)}</td><td>${num(T.expenses)}</td><td class="${T.balance < 0 ? 'neg' : 'pos'}">${num(T.balance)}</td><td>${num(T.left)}</td><td>${num(run)}</td></tr></tfoot>
     </table></div>
-    <p class="small muted" style="margin:10px 0 0">Amounts in ${esc(S.db.settings.currency)}. Tap a month to open it. "Savings" is the running total of balances.</p></div>`;
+    <p class="small muted" style="margin:10px 0 0">Amounts in ${esc(S.db.settings.currency)}. Tap a month to open it. "Savings" is the running total of balances. ≈ = estimated income (real income not in yet).</p></div>`;
 }
 
 function budgetMore() {
   return `<div class="card"><div class="section-head"><h2>📆 Months</h2></div>
-      <p class="small muted" style="margin-top:0">Add the month after the last one. Items that are in every month so far can be copied over, all set to unpaid. Income comes from 💰 Money automatically.</p>
+      <p class="small muted" style="margin-top:0">Add the month after the last one. Items that are in every month so far can be copied over, all set to unpaid. Income comes from 💸 Spending automatically.</p>
       <div class="row wrap"><button class="btn primary" data-action="bAddMonth">＋ Add next month</button>
         <button class="btn danger" data-action="bRemoveMonth">Remove last month</button></div></div>
     <div class="card"><div class="section-head"><h2>💾 Backup</h2></div>
@@ -2453,6 +2477,29 @@ ACTIONS.bView = (v) => { S.bView = v; render(); window.scrollTo(0, 0); };
 ACTIONS.bMonth = (n) => { const ks = bKeys(), k = ks[ks.indexOf(S.bMonth) + Number(n)]; if (k) { S.bMonth = k; render(); } };
 ACTIONS.bOpenMonth = (k) => { S.bMonth = k; S.bView = 'month'; render(); window.scrollTo(0, 0); };
 ACTIONS.bAdd = (type) => budgetForm(type, null);
+ACTIONS.bEstimate = () => {
+  const k = S.bMonth, ks = bKeys(), later = ks.filter((x) => x > k);
+  const cur = +S.budget.months[k].estimate || 0;
+  openForm({
+    title: `Estimated income · ${bLabel(k, true)}`,
+    meta: `<p class="small muted" style="margin:-6px 0 14px">Plan before your income comes in. Budget uses this until real income for ${bLabel(k, true).split(' ')[0]} is added in Spending, then switches to the real amount automatically.</p>`,
+    fields: [
+      { name: 'estimate', label: `Estimated income (${S.db.settings.currency})`, type: 'number', step: '0.01', min: 0, value: cur || '', placeholder: 'e.g. 4000' },
+      ...(later.length ? [{ name: 'later', label: 'Also use for all later months', type: 'checkbox' }] : []),
+    ],
+    onSubmit: (v) => {
+      const amount = r2(parseFloat(v.estimate) || 0);
+      for (const m of [k, ...(v.later === 'on' ? later : [])]) {
+        if (amount > 0) S.budget.months[m].estimate = amount; else delete S.budget.months[m].estimate;
+      }
+      saveBudget(); render();
+      toast(amount > 0 ? `Estimated income ${money(amount)}${v.later === 'on' ? ` for ${later.length + 1} months` : ''}` : 'Estimate cleared');
+    },
+    onDelete: cur ? () => { delete S.budget.months[k].estimate; saveBudget(); render(); toast('Estimate cleared'); } : null,
+    deleteLabel: 'Clear estimate',
+    confirmDelete: false,
+  });
+};
 ACTIONS.bAddIncome = () => {
   const r = budgetRange(S.bMonth);
   txForm(null, 'income', { person: S.me, pocket: MAIN_POCKET, date: inRange(today(), r) ? today() : r.start });
@@ -2468,11 +2515,12 @@ ACTIONS.bToggle = (id) => {
 };
 ACTIONS.bAddMonth = () => {
   const ks = bKeys(), last = ks[ks.length - 1], next = shiftMonth(last, 1);
-  const copy = confirm(`Add ${bLabel(next, true)}.\n\nCopy fixed items (items in every month so far) from ${bLabel(last)}?\n\nIncome comes from 💰 Money automatically.\n\nOK = copy · Cancel = start empty`);
+  const copy = confirm(`Add ${bLabel(next, true)}.\n\nCopy fixed items (items in every month so far) from ${bLabel(last)}?\n\nIncome comes from 💸 Spending automatically. Estimated income is copied too.\n\nOK = copy · Cancel = start empty`);
   const lastMo = S.budget.months[last];
   const everyMonth = (name) => ks.every((k) => S.budget.months[k].expenses.some((e) => e.item === name));
   S.budget.months[next] = copy ? {
     income: [],
+    ...(lastMo.estimate ? { estimate: lastMo.estimate } : {}),
     expenses: lastMo.expenses.filter((e) => everyMonth(e.item)).map((e) => ({ ...e, id: bId(), paid: false, notes: '' })),
   } : { income: [], expenses: [] };
   S.bMonth = next; S.bView = 'month';
@@ -2501,6 +2549,7 @@ ACTIONS.bCsv = () => {
     const bi = budgetIncome(k);
     for (const t of bi.fromMoney) rows.push([bLabel(k), 'Income', t.description || t.category || 'Income', '', t.amount, '', '']);
     for (const e of bi.budgetOnly) rows.push([bLabel(k), 'Income', e.source, '', e.amount, '', '']);
+    if (bi.estimated) rows.push([bLabel(k), 'Estimated income', 'Estimate', '', bi.estimate, '', '']);
     for (const e of S.budget.months[k].expenses) rows.push([bLabel(k), 'Expense', e.item, e.payTo, e.amount, e.paid ? 'Yes' : 'No', e.notes]);
   }
   downloadFile(`budget-${today()}.csv`, rows.map((r) => r.map(q).join(',')).join('\n'), 'text/csv');

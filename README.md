@@ -4,12 +4,12 @@ A shared web app for two people, built on **Firebase**. You each sign in with a 
 
 ## Modules
 
-**Getting around:** tap the pill at the bottom centre (it shows the section you're in, e.g. *☰ Home*). The sections fan out above it as bubbles (🏠 Home · 🐱 Cats · 💰 Money · 📒 Budget · 🛒 Grocery, each always in the same spot); tap one to go there. Tap ✕ or the dimmed background to close. A red dot on the pill means something in Grocery is expiring soon.
+**Getting around:** tap the pill at the bottom centre (it shows the section you're in, e.g. *☰ Home*). The sections fan out above it as bubbles (🏠 Home · 🐱 Cats · 💸 Spending · 📒 Budget · 🛒 Grocery, each always in the same spot); tap one to go there. Tap ✕ or the dimmed background to close. A red dot on the pill means something in Grocery is expiring soon.
 
 ### 🏠 Home
 The first screen: an overview of everything.
 - **🐾 Cats · next up:** the next five cat dates (vet visits, vaccines, deworm, weigh-ins…). Tap one to open that cat.
-- **💰 This month:** each person's income, spending and what's left. Tap a person to open their Money tab.
+- **💸 This budget period:** each person's income, spending and what's left. Tap a person to open their Spending tab.
 - **🛒 To buy:** the shopping list, which you can tick off right there, plus anything **⚠️ expiring soon**.
 
 **Who changed what:** every cat record, weight, meal, date, income, spending and grocery item shows who added it or last updated it, and when (for example *Updated by Husband · 5m ago*). Edit forms show the full history. **⚙️ → Recent activity** lists recent changes from both of you across all modules.
@@ -19,7 +19,7 @@ The ⚙️ button (top right) opens a menu: **Household**, **Currency**, **Recen
 
 **Household**
 - **👨‍👩‍🐈 Household** lists everyone in the home: the two of you, each with a role, and every cat (🐱 Cat). Tap a cat to open it.
-- Each of you sets **your own role** (Wife, Husband, Partner or Other); the app doesn't let you change the other person's. Roles also show next to your names on Home and in Money.
+- Each of you sets **your own role** (Wife, Husband, Partner or Other); the app doesn't let you change the other person's. Roles also show next to your names on Home and in Spending.
 - Each person appears after they've signed in once.
 
 ### 🐱 Cats
@@ -35,23 +35,24 @@ The ⚙️ button (top right) opens a menu: **Household**, **Currency**, **Recen
 
 **Importing records:** ⚙️ → **📥 Import records** takes an import file (`.json`), shows a preview, then saves it under your name. Cats are matched by name, and anything already in the app is skipped, so importing the same file twice is safe. Keep import files out of this repo, because it's public.
 
-### 💰 Money
+### 💸 Spending
 - Tabs for **Mine**, **your partner's** and **👫 Both**. Each income or spending entry belongs to one of you; pick **Whose** in the form, which defaults to the tab you're on.
 - Month by month: tap the round **＋** (bottom right) to add **spending**, or switch it to **income** in the form, with a category and date
 - Income, spent and what's left, plus a breakdown of where the money went by category. **Both** also shows each person's balance.
 - **Pockets** (⚙️ → **Pockets**, or **Edit** on the Pockets card): split your money into pockets such as Meal, Selfcare or Clothes. **Main** is always there and is the default. Each income goes *into* a pocket and each spending comes *from* one; the Pockets card shows what's in, spent and left in each for the current budget period, and tapping a pocket shows only its entries. Renaming a pocket keeps its entries; removing one moves them to Main. Each of you has your own pockets.
 - **Carry-over:** whatever is left in a pocket at the end of a budget period carries into the next one ("Carried over" on the Pockets card and at the top of the Income list; **Left** includes it). Only leftover money carries: an overspent pocket starts the next period at 0. It's worked out from your entries, so editing an old entry updates the periods after it.
 - **Auto-add from Apple Pay** (iPhone, ⚙️ → **Auto-add (Apple Pay)** for the steps): a Shortcuts *Transaction* automation opens `…/Household-Tracker/?spend=<Amount>&at=<Merchant>` whenever you tap your card. The app (signed in, in Safari) adds it to your **Main** pocket for today with a best-guess category from the merchant name, tagged **📲 Apple Pay**. No password is stored in the Shortcut. Only Apple Pay taps can be captured: iOS doesn't let apps read other apps' notifications, so MAE QR / DuitNow payments are still added with ＋.
-- **Budget period** (⚙️ → **Budget period**): each of you picks the day your budget month starts, e.g. the **25th** for 25 Oct – 24 Nov, then 25 Nov – 24 Dec and so on (default: the 1st, a calendar month). Your Money tab shows your own period's dates and ‹ › moves a period at a time; **Both** and **Home** count each person in their own period. You can only change your own.
+- **Budget period** (⚙️ → **Budget period**): each of you picks the day your budget month starts, e.g. the **25th** for 25 Oct – 24 Nov, then 25 Nov – 24 Dec and so on (default: the 1st, a calendar month). Your Spending tab shows your own period's dates (and which Budget month it belongs to) and ‹ › moves a period at a time; **Both** and **Home** count each person in their own period. You can only change your own.
 - Each person is added to the tabs the first time they sign in. Entries from before this change belong to whoever added them.
 - **Copy last month's income** with one tap; the currency symbol is set in ⚙️ → **Currency**
 
 ### 📒 Budget (private)
 Your own monthly budget, ported from *Money Diary*. **Only you can see your budget.** Your husband has his own, and neither of you can open the other's (the database rules enforce this, not just the app).
-- **Income comes from 💰 Money**: each budget month shows your Money income for the matching budget period (if your period starts on the 25th, *November* = 25 Oct – 24 Nov), so you only enter income once. *＋ Add income* in Budget saves it into Money. Budget months show just the month name.
+- **Income comes from 💸 Spending**: each budget month shows your Spending income for the period that *starts* in that month (if your period starts on the 25th, *November* = 25 Nov – 24 Dec), so you only enter income once. *＋ Add income* in Budget saves it into Spending. Budget months show just the month name, and Budget opens on the month you're in now.
+- **≈ Estimated income:** before your income for a month arrives, set an estimate (*≈ Set estimated income*, optionally for all later months too) to check your budget. The month shows *Income (estimated)* and the Summary marks it with ≈. Once real income is added in Spending it's used instead, with a note comparing it to the estimate.
 - **Month:** balance, income, expenses and *still to pay* (with how many are paid). Tap ○ to mark an expense paid; tap a row to edit it. ＋ adds an expense: past items suggest their usual payee and amount, and *Also add to all later months* handles repeating bills. Swipe left or right to change month.
 - **Summary:** a table of every month (income, expenses, balance, to pay, running savings) with totals; tap a month to open it.
-- **More:** add the next month (copies income and fixed items, unpaid), remove the last month, download or restore a backup (Money Diary backups work too), export CSV, or reset.
+- **More:** add the next month (copies the estimated income and fixed items, unpaid), remove the last month, download or restore a backup (Money Diary backups work too), export CSV, or reset.
 - Needs the `budgets` rule in `firestore.rules`. Paste the updated rules into Firebase once.
 
 ### 🛒 Grocery

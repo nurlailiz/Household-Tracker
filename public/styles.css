@@ -614,3 +614,8 @@ body.nav-open { overflow: hidden; }
 .toggle { display: flex; align-items: center; gap: 10px; margin: 4px 0 14px; font-size: 1rem; cursor: pointer; }
 .toggle input { width: 22px; height: 22px; margin: 0; accent-color: var(--accent); }
 .btn.icon:disabled { opacity: .35; }
+
+/* ---------- V3.8: estimated income ---------- */
+.b-estimate > li { background: var(--accent-soft); border-radius: 12px; padding: 10px; margin-bottom: 6px; border-top: 0; }
+.b-est-ico { width: 24px; text-align: center; font-size: 1.3rem; font-weight: 800; color: var(--accent); }
+.b-est-note { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
