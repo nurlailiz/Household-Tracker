@@ -276,6 +276,34 @@ function scheduleRender() {
 // Modal form builder
 // ============================================================
 // fields: [{ name, label, type: text|number|date|time|month|textarea|select|segment|photo, options, required, value, step, placeholder }]
+const moneyText = (n) => (Math.round((+n || 0) * 100) / 100).toFixed(2);
+function wireMoney(inp) {
+  const toEnd = () => { const n = inp.value.length; try { inp.setSelectionRange(n, n); } catch { /* not focused */ } };
+  const set = (digits) => { inp.value = (Number(digits.replace(/^0+/, '').slice(0, 11) || 0) / 100).toFixed(2); toEnd(); };
+  const digitsOf = () => inp.value.replace(/\D/g, '').replace(/^0+/, '');
+  // Each key adds a digit on the right (or ⌫ removes the last one), wherever the cursor is.
+  inp.addEventListener('beforeinput', (e) => {
+    if (!e.cancelable || e.inputType === 'insertFromPaste') return;
+    const all = inp.value && inp.selectionStart === 0 && inp.selectionEnd === inp.value.length;
+    if (e.inputType.startsWith('insert')) {
+      e.preventDefault();
+      set((all ? '' : digitsOf()) + (e.data || '').replace(/\D/g, ''));
+    } else if (e.inputType.startsWith('delete')) {
+      e.preventDefault();
+      set(all ? '' : digitsOf().slice(0, -1));
+    }
+  });
+  // Fallback for keyboards that can't be intercepted: re-read the digits.
+  inp.addEventListener('input', () => set(digitsOf()));
+  // Pasting "12.5" means 12.50, not 1.25.
+  inp.addEventListener('paste', (e) => {
+    const n = parseFloat((e.clipboardData?.getData('text') || '').replace(/[^\d.]/g, ''));
+    if (Number.isFinite(n)) { e.preventDefault(); inp.value = moneyText(n); toEnd(); }
+  });
+  inp.addEventListener('focus', () => { toEnd(); setTimeout(toEnd, 0); });
+  inp.addEventListener('click', toEnd);
+}
+
 function openForm({ title, fields, submitLabel = 'Save', onSubmit, onDelete, deleteLabel = 'Delete', confirmDelete = true, meta = '', footer = '' }) {
   const modal = $('#modal');
   const fieldHtml = (f) => {
@@ -285,6 +313,11 @@ function openForm({ title, fields, submitLabel = 'Save', onSubmit, onDelete, del
     if (f.type === 'segment') {
       return `${f.showLabel ? `<div class="field-label">${esc(f.label)}</div>` : ''}<div class="seg${f.wrap ? ' wrap' : ''}" data-seg="${f.name}" role="radiogroup" aria-label="${esc(f.label)}">${f.options.map((o) =>
         `<label><input type="radio" name="${f.name}" value="${esc(o.value)}" ${o.value === v ? 'checked' : ''}>${esc(o.label)}</label>`).join('')}</div>`;
+    }
+    if (f.type === 'money') {
+      // Cash-register style: digits fill in from the right, so typing 1 gives 0.01, then 12 → 0.12, 1234 → 12.34.
+      return `<label class="field" for="${id}"><span>${esc(f.label)}${f.required ? ' *' : ''}</span>
+        <input id="${id}" name="${f.name}" class="money-input" data-money type="text" inputmode="numeric" value="${moneyText(v)}" autocomplete="off"></label>`;
     }
     if (f.type === 'checkbox') {
       return `<label class="toggle"><input type="checkbox" name="${f.name}" ${v ? 'checked' : ''}> ${esc(f.label)}</label>`;
@@ -342,6 +375,8 @@ function openForm({ title, fields, submitLabel = 'Save', onSubmit, onDelete, del
     b.addEventListener('click', () => { inp.value = ''; sync(); inp.dispatchEvent(new Event('change', { bubbles: true })); });
   });
 
+  modal.querySelectorAll('[data-money]').forEach(wireMoney);
+
   const photoInput = $('#photoInput', modal);
   if (photoInput) {
     const hidden = form.querySelector('input[type=hidden]');
@@ -367,7 +402,8 @@ function openForm({ title, fields, submitLabel = 'Save', onSubmit, onDelete, del
     e.preventDefault();
     for (const f of fields) {
       const el = form.querySelector(`[name="${f.name}"]`); // not form.elements[name]: names like "item" clash with its built-in methods
-      if (f.required && !String(el?.value ?? '').trim()) {
+      const empty = f.type === 'money' ? !(parseFloat(el?.value) > 0 || (f.allowZero && el?.value)) : !String(el?.value ?? '').trim();
+      if (f.required && empty) {
         err.textContent = `${f.label} is required.`;
         el?.focus?.();
         return;
@@ -380,8 +416,10 @@ function openForm({ title, fields, submitLabel = 'Save', onSubmit, onDelete, del
   };
 
   modal.showModal();
-  const first = form.querySelector('input:not([type=hidden]):not([type=radio]):not([type=file]), textarea, select');
-  if (first && matchMedia('(pointer: fine)').matches) first.focus();
+  // A field marked focus: true (e.g. the amount when adding) gets the keyboard straight away, also on phones.
+  const auto = fields.find((f) => f.focus);
+  const first = auto ? form.querySelector(`[name="${auto.name}"]`) : form.querySelector('input:not([type=hidden]):not([type=radio]):not([type=file]), textarea, select');
+  if (first && (auto || matchMedia('(pointer: fine)').matches)) first.focus();
 }
 
 function resizeImage(file, max) {
@@ -1698,7 +1736,7 @@ function txForm(t, type, opts = {}) {
       { name: 'pocket', type: 'segment', label: 'Pocket', showLabel: true, wrap: true,
         value: t ? pocketOf(t) : (opts.pocket || S.pocket || MAIN_POCKET),
         options: pocketSegment(t ? personOf(t) : (moneyWho() === 'all' ? S.me : moneyWho())) },
-      { name: 'amount', label: `Amount (${S.db.settings.currency})`, type: 'number', step: '0.01', min: 0, required: true, value: t?.amount },
+      { name: 'amount', label: `Amount (${S.db.settings.currency})`, type: 'money', required: true, value: t?.amount, focus: !t },
       { name: 'description', label: 'Description (optional)', value: t?.description, placeholder: type === 'income' ? 'e.g. My salary' : 'e.g. Electricity bill' },
       { name: 'location', label: 'Location (optional)', value: t?.location, placeholder: 'e.g. Aeon Shah Alam',
         suggestions: [...new Set(S.db.transactions.map((x) => x.location).filter(Boolean))].sort() },
@@ -2435,7 +2473,7 @@ function budgetForm(type, id) {
     for (const e of S.budget.months[k].expenses) { if (e.item) items.add(e.item); if (e.payTo) payees.add(e.payTo); }
     for (const e of S.budget.months[k].income) if (e.source) sources.add(e.source);
   }
-  const amountField = { name: 'amount', label: `Amount (${S.db.settings.currency})`, type: 'number', step: '0.01', min: 0, required: true, value: x?.amount };
+  const amountField = { name: 'amount', label: `Amount (${S.db.settings.currency})`, type: 'money', required: true, value: x?.amount, focus: !x, allowZero: !!x };
   // Installments: an expense can run for N months, counting this one (e.g. a loan with 6 payments
   // left = 6). Months that don't exist yet are added; months that already have the item are skipped.
   const later = ks.filter((k) => k > S.bMonth);
@@ -2449,14 +2487,14 @@ function budgetForm(type, id) {
   openForm({
     title: `${x ? 'Edit' : 'Add'} ${isExp ? 'expense' : 'income'} · ${bLabel(S.bMonth)}`,
     fields: isExp ? [
+      amountField,
       { name: 'item', label: 'Item', required: true, value: x?.item, suggestions: [...items] },
       { name: 'payTo', label: 'Pay to (optional)', value: x?.payTo, suggestions: [...payees] },
-      amountField,
       { name: 'notes', label: 'Notes (optional)', value: x?.notes },
       { name: 'paid', label: 'Paid ✓', type: 'checkbox', value: !!x?.paid },
     ] : [
-      { name: 'source', label: 'Source', required: true, value: x?.source, suggestions: [...sources] },
       amountField,
+      { name: 'source', label: 'Source', required: true, value: x?.source, suggestions: [...sources] },
     ],
     footer: repeatHtml,
     onSubmit: (v) => {
@@ -2511,7 +2549,7 @@ function budgetForm(type, id) {
       const name = $('#f_item').value.trim();
       for (const k of [...ks].reverse()) {
         const hit = S.budget.months[k].expenses.find((e) => e.item === name);
-        if (hit) { if (!$('#f_payTo').value) $('#f_payTo').value = hit.payTo || ''; if (!$('#f_amount').value) $('#f_amount').value = hit.amount; break; }
+        if (hit) { if (!$('#f_payTo').value) $('#f_payTo').value = hit.payTo || ''; if (!(parseFloat($('#f_amount').value) > 0)) $('#f_amount').value = moneyText(hit.amount); break; }
       }
     });
   }
@@ -2528,7 +2566,7 @@ ACTIONS.bEstimate = () => {
     title: `Estimated income · ${bLabel(k, true)}`,
     meta: `<p class="small muted" style="margin:-6px 0 14px">Plan before your income comes in. Budget uses this until real income for ${bLabel(k, true).split(' ')[0]} is added in Spending, then switches to the real amount automatically.</p>`,
     fields: [
-      { name: 'estimate', label: `Estimated income (${S.db.settings.currency})`, type: 'number', step: '0.01', min: 0, value: cur || '', placeholder: 'e.g. 4000' },
+      { name: 'estimate', label: `Estimated income (${S.db.settings.currency})`, type: 'money', value: cur, focus: true },
       ...(later.length ? [{ name: 'later', label: 'Also use for all later months', type: 'checkbox' }] : []),
     ],
     onSubmit: (v) => {

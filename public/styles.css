@@ -626,3 +626,6 @@ body.nav-open { overflow: hidden; }
 .b-rep-row input { flex: 0 0 64px; width: 64px; padding-left: 6px; padding-right: 6px; text-align: center; font-weight: 700; }
 .b-rep-chips { padding-bottom: 4px; margin: 0; }
 .b-rep-hint { margin: 6px 0 0; min-height: 1.2em; }
+
+/* ---------- Amount fields (cash-register style) ---------- */
+.money-input { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: .01em; }
