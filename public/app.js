@@ -1683,20 +1683,20 @@ ACTIONS.copyIncome = async () => {
   toast(`Copied ${prev.length} income item${prev.length === 1 ? '' : 's'}`);
 };
 
-function txForm(t, type) {
+function txForm(t, type, opts = {}) {
   type = t?.type || type;
   const viewRange = periodOf(moneyWho() === 'all' ? S.me : moneyWho());
-  const defaultDate = inRange(today(), viewRange) ? today() : viewRange.start;
+  const defaultDate = opts.date || (inRange(today(), viewRange) ? today() : viewRange.start);
   const cats = type === 'income' ? INCOME_CATS : EXPENSE_CATS;
   openForm({
     title: `${t ? 'Edit' : 'Add'} ${type === 'income' ? 'income' : 'spending'}`,
     meta: history(t),
     fields: [
       { name: 'type', type: 'segment', label: 'Type', value: type, options: [{ value: 'expense', label: 'Spending' }, { value: 'income', label: 'Income' }] },
-      { name: 'person', type: 'segment', label: 'Whose', value: t ? personOf(t) : (moneyWho() === 'all' ? S.me : moneyWho()),
+      { name: 'person', type: 'segment', label: 'Whose', value: t ? personOf(t) : (opts.person || (moneyWho() === 'all' ? S.me : moneyWho())),
         options: people().map((p) => ({ value: p, label: p === S.me ? `Mine (${p})` : `${p}'s` })) },
       { name: 'pocket', type: 'segment', label: 'Pocket', showLabel: true, wrap: true,
-        value: t ? pocketOf(t) : (S.pocket || MAIN_POCKET),
+        value: t ? pocketOf(t) : (opts.pocket || S.pocket || MAIN_POCKET),
         options: pocketSegment(t ? personOf(t) : (moneyWho() === 'all' ? S.me : moneyWho())) },
       { name: 'amount', label: `Amount (${S.db.settings.currency})`, type: 'number', step: '0.01', min: 0, required: true, value: t?.amount },
       { name: 'description', label: 'Description (optional)', value: t?.description, placeholder: type === 'income' ? 'e.g. My salary' : 'e.g. Electricity bill' },
@@ -2246,14 +2246,30 @@ const bLabel = (k, long) => parseDate(`${k}-01`).toLocaleDateString(undefined, {
 const r2 = (n) => Math.round(n * 100) / 100;
 function budgetSeed() {
   const months = {};
-  let k = thisMonth();
-  for (let i = 0; i < 12; i++, k = shiftMonth(k, 1)) months[k] = { income: [{ id: bId(), source: 'Salary', amount: 0 }], expenses: [] };
+  let k = currentBudgetKey();
+  for (let i = 0; i < 12; i++, k = shiftMonth(k, 1)) months[k] = { income: [], expenses: [] };
   return { months };
 }
+// Income for a budget month comes from Money: your income entries in the matching budget period
+// (Budget's "November" = Money's period that ends in November, e.g. 25 Oct – 24 Nov).
+// Income typed into Budget before syncing is only counted for months with no Money income,
+// so older history still shows and nothing is counted twice.
+const budgetRange = (k) => periodRange(periodStartDay(S.me), k);
+function budgetIncome(k) {
+  const r = budgetRange(k);
+  const fromMoney = S.db.transactions.filter((t) => t.type === 'income' && personOf(t) === S.me && inRange(txDate(t), r))
+    .sort((a, b) => txDate(b).localeCompare(txDate(a)) || (b.createdAt || '').localeCompare(a.createdAt || ''));
+  const budgetOnly = fromMoney.length ? [] : (S.budget.months[k]?.income || []).filter((x) => +x.amount > 0);
+  const total = r2(fromMoney.reduce((n, t) => n + t.amount, 0) + budgetOnly.reduce((n, x) => n + (+x.amount || 0), 0));
+  return { fromMoney, budgetOnly, total };
+}
+// The budget month you're in now, following your Money budget period.
+const currentBudgetKey = () => currentPeriodKey(periodStartDay(S.me));
+
 function bTotals(k) {
   const mo = S.budget.months[k];
   const sum = (list) => r2(list.reduce((n, x) => n + (+x.amount || 0), 0));
-  const income = sum(mo.income), expenses = sum(mo.expenses), left = sum(mo.expenses.filter((x) => !x.paid));
+  const income = budgetIncome(k).total, expenses = sum(mo.expenses), left = sum(mo.expenses.filter((x) => !x.paid));
   return { income, expenses, balance: r2(income - expenses), left, paid: mo.expenses.filter((x) => x.paid).length, count: mo.expenses.length };
 }
 
@@ -2263,14 +2279,14 @@ function startBudgetSync(uid) {
     const d = snap.data();
     S.budgetError = null;
     if (d && d.months) S.budget = { months: d.months };
-    else if (!snap.metadata?.fromCache) { S.budget = budgetSeed(); saveBudget(); } // first time: 12 empty months
+    else if (!snap.metadata?.fromCache) S.budgetMissing = true; // first time: set up when the budget is first shown (needs your settings)
     scheduleRender();
   }, (e) => {
     S.budgetError = e.code === 'permission-denied' ? 'rules' : e.message;
     scheduleRender();
   });
 }
-function stopBudgetSync() { budgetUnsub?.(); budgetUnsub = null; S.budget = null; S.budgetError = null; }
+function stopBudgetSync() { budgetUnsub?.(); budgetUnsub = null; S.budget = null; S.budgetError = null; S.budgetMissing = false; }
 function saveBudget() {
   background(setDoc(doc(fdb, 'budgets', S.uid), { months: S.budget.months, updatedAt: new Date().toISOString() }));
 }
@@ -2282,9 +2298,13 @@ function renderBudget() {
       <p class="small muted">Copy the new rules from <strong>firestore.rules</strong> (with your two usernames) into Firebase console → Firestore Database → Rules → Publish, then reopen the app.</p></div>`;
   }
   if (S.budgetError) return `<div class="card"><p class="empty">The budget couldn't load: ${esc(S.budgetError)}</p></div>`;
+  if (!S.budget && S.budgetMissing) { S.budget = budgetSeed(); S.budgetMissing = false; saveBudget(); }
   if (!S.budget) return '<div class="loading">Loading your budget…</div>';
   const ks = bKeys();
-  if (!S.budget.months[S.bMonth]) S.bMonth = S.budget.months[thisMonth()] ? thisMonth() : ks[0];
+  if (!S.budget.months[S.bMonth]) {
+    const now = currentBudgetKey();
+    S.bMonth = S.budget.months[now] ? now : ([...ks].reverse().find((k) => k <= now) || ks[0]);
+  }
   const tabs = [['month', '📅 Month'], ['summary', '✨ Summary'], ['more', '⚙️ More']];
   const head = `<div class="seg money-tabs" role="tablist">${tabs.map(([id, label]) =>
     `<button role="tab" data-action="bView" data-id="${id}" aria-selected="${S.bView === id}">${label}</button>`).join('')}</div>
@@ -2300,8 +2320,14 @@ function budgetMonth(ks) {
       <div class="grow"><div class="title">${esc(x.item)}</div>
         ${x.payTo || x.notes ? `<div class="meta">${esc([x.payTo && `→ ${x.payTo}`, x.notes].filter(Boolean).join(' · '))}</div>` : ''}</div>
       <span class="amount">${money(+x.amount || 0)}</span></li>`).join('');
-  const inc = mo.income.map((x) => `<li class="clickable" data-action="bEdit" data-id="inc:${x.id}">
-      <div class="grow"><div class="title">${esc(x.source)}</div></div><span class="amount income">${money(+x.amount || 0)}</span></li>`).join('');
+  const bi = budgetIncome(k);
+  const inc = bi.fromMoney.map((x) => `<li class="clickable" data-action="editTx" data-id="${x.id}">
+      <div class="grow"><div class="title">${esc(x.description || x.category || 'Income')}</div>
+        <div class="meta">${esc([x.description ? x.category : '', fmtShort(txDate(x)), pocketsOf(S.me).length > 1 ? `into ${pocketOf(x)}` : ''].filter(Boolean).join(' · '))}</div></div>
+      <span class="amount income">${money(x.amount)}</span></li>`).join('')
+    + bi.budgetOnly.map((x) => `<li class="clickable" data-action="bEdit" data-id="inc:${x.id}">
+      <div class="grow"><div class="title">${esc(x.source)}</div><div class="meta"><span class="badge">Budget only</span></div></div>
+      <span class="amount income">${money(+x.amount || 0)}</span></li>`).join('');
   return `<div class="b-month">
     <div class="month-nav">
       <button class="btn icon" data-action="bMonth" data-id="-1" aria-label="Previous month" ${i <= 0 ? 'disabled' : ''}>‹</button>
@@ -2318,9 +2344,10 @@ function budgetMonth(ks) {
     <div class="card"><div class="section-head"><h2>Expenses<small>${mo.expenses.length}</small></h2><span class="small muted">tap ○ when paid</span></div>
       ${exp ? `<ul class="list">${exp}</ul>` : '<p class="empty">No expenses yet. Tap ＋ to add one.</p>'}
       <button class="btn ghost" data-action="bAdd" data-id="exp">＋ Add expense</button></div>
-    <div class="card"><div class="section-head"><h2>Income<small>${mo.income.length}</small></h2></div>
-      ${inc ? `<ul class="list">${inc}</ul>` : '<p class="empty">No income yet.</p>'}
-      <button class="btn ghost" data-action="bAdd" data-id="inc">＋ Add income</button></div>
+    <div class="card"><div class="section-head"><h2>Income<small>${bi.fromMoney.length + bi.budgetOnly.length}</small></h2><span class="small muted">from 💰 Money</span></div>
+      ${inc ? `<ul class="list">${inc}</ul>` : '<p class="empty">No income in Money for this month yet.</p>'}
+      <button class="btn ghost" data-action="bAddIncome">＋ Add income</button>
+      <p class="small muted" style="margin:6px 0 0">Income you add in Money shows here automatically, and income added here goes into Money.</p></div>
   </div>
   <div class="fab-space" aria-hidden="true"></div>
   <button class="fab" data-action="bAdd" data-id="exp" aria-label="Add expense">
@@ -2349,7 +2376,7 @@ function budgetSummary(ks) {
 
 function budgetMore() {
   return `<div class="card"><div class="section-head"><h2>📆 Months</h2></div>
-      <p class="small muted" style="margin-top:0">Add the month after the last one. Income and items that are in every month so far can be copied over, all set to unpaid.</p>
+      <p class="small muted" style="margin-top:0">Add the month after the last one. Items that are in every month so far can be copied over, all set to unpaid. Income comes from 💰 Money automatically.</p>
       <div class="row wrap"><button class="btn primary" data-action="bAddMonth">＋ Add next month</button>
         <button class="btn danger" data-action="bRemoveMonth">Remove last month</button></div></div>
     <div class="card"><div class="section-head"><h2>💾 Backup</h2></div>
@@ -2426,6 +2453,10 @@ ACTIONS.bView = (v) => { S.bView = v; render(); window.scrollTo(0, 0); };
 ACTIONS.bMonth = (n) => { const ks = bKeys(), k = ks[ks.indexOf(S.bMonth) + Number(n)]; if (k) { S.bMonth = k; render(); } };
 ACTIONS.bOpenMonth = (k) => { S.bMonth = k; S.bView = 'month'; render(); window.scrollTo(0, 0); };
 ACTIONS.bAdd = (type) => budgetForm(type, null);
+ACTIONS.bAddIncome = () => {
+  const r = budgetRange(S.bMonth);
+  txForm(null, 'income', { person: S.me, pocket: MAIN_POCKET, date: inRange(today(), r) ? today() : r.start });
+};
 ACTIONS.bEdit = (ref) => { const [type, id] = ref.split(':'); budgetForm(type, id); };
 ACTIONS.bToggle = (id) => {
   const x = S.budget.months[S.bMonth].expenses.find((r) => r.id === id);
@@ -2437,13 +2468,13 @@ ACTIONS.bToggle = (id) => {
 };
 ACTIONS.bAddMonth = () => {
   const ks = bKeys(), last = ks[ks.length - 1], next = shiftMonth(last, 1);
-  const copy = confirm(`Add ${bLabel(next, true)}.\n\nCopy income and fixed items (items in every month so far) from ${bLabel(last)}?\n\nOK = copy · Cancel = start empty`);
+  const copy = confirm(`Add ${bLabel(next, true)}.\n\nCopy fixed items (items in every month so far) from ${bLabel(last)}?\n\nIncome comes from 💰 Money automatically.\n\nOK = copy · Cancel = start empty`);
   const lastMo = S.budget.months[last];
   const everyMonth = (name) => ks.every((k) => S.budget.months[k].expenses.some((e) => e.item === name));
   S.budget.months[next] = copy ? {
-    income: lastMo.income.map((e) => ({ ...e, id: bId() })),
+    income: [],
     expenses: lastMo.expenses.filter((e) => everyMonth(e.item)).map((e) => ({ ...e, id: bId(), paid: false, notes: '' })),
-  } : { income: [{ id: bId(), source: 'Salary', amount: 0 }], expenses: [] };
+  } : { income: [], expenses: [] };
   S.bMonth = next; S.bView = 'month';
   saveBudget(); render(); toast(`${bLabel(next)} added`);
 };
@@ -2467,7 +2498,9 @@ ACTIONS.bCsv = () => {
   const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const rows = [['Month', 'Type', 'Item', 'Pay to', 'Amount', 'Paid', 'Notes']];
   for (const k of bKeys()) {
-    for (const e of S.budget.months[k].income) rows.push([bLabel(k), 'Income', e.source, '', e.amount, '', '']);
+    const bi = budgetIncome(k);
+    for (const t of bi.fromMoney) rows.push([bLabel(k), 'Income', t.description || t.category || 'Income', '', t.amount, '', '']);
+    for (const e of bi.budgetOnly) rows.push([bLabel(k), 'Income', e.source, '', e.amount, '', '']);
     for (const e of S.budget.months[k].expenses) rows.push([bLabel(k), 'Expense', e.item, e.payTo, e.amount, e.paid ? 'Yes' : 'No', e.notes]);
   }
   downloadFile(`budget-${today()}.csv`, rows.map((r) => r.map(q).join(',')).join('\n'), 'text/csv');

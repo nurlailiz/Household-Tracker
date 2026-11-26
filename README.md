@@ -48,6 +48,7 @@ The ⚙️ button (top right) opens a menu: **Household**, **Currency**, **Recen
 
 ### 📒 Budget (private)
 Your own monthly budget, ported from *Money Diary*. **Only you can see your budget.** Your husband has his own, and neither of you can open the other's (the database rules enforce this, not just the app).
+- **Income comes from 💰 Money**: each budget month shows your Money income for the matching budget period (if your period starts on the 25th, *November* = 25 Oct – 24 Nov), so you only enter income once. *＋ Add income* in Budget saves it into Money. Budget months show just the month name.
 - **Month:** balance, income, expenses and *still to pay* (with how many are paid). Tap ○ to mark an expense paid; tap a row to edit it. ＋ adds an expense: past items suggest their usual payee and amount, and *Also add to all later months* handles repeating bills. Swipe left or right to change month.
 - **Summary:** a table of every month (income, expenses, balance, to pay, running savings) with totals; tap a month to open it.
 - **More:** add the next month (copies income and fixed items, unpaid), remove the last month, download or restore a backup (Money Diary backups work too), export CSV, or reset.
